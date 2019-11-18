@@ -1,16 +1,14 @@
-# $Id: //depot/blt/srv/vfs/Makefile#2 $
+BLTHOME := ../../
+include $(BLTHOME)make.conf
 
-include ../../make.conf
+BINARY		:= vfs.bin
+OBJS		:= vfs.o fs.o super.o vnode.o shm.o path.o rootfs.o bootfs.o
+CRT0		:= $(BLTHOME)lib/crtb.o
+LIBS		:= -lposix -lblt -ldl -lc
+SUBDIRS		:= drivers
 
-CFLAGS = $(CF) -I../../include
-LIBS = -L../../lib/obj -lblt -lc
+#CFLAGS 	+= -DVFS_SANDBOX -Isandbox -Wall
 
-all: vfs.bin
+sandbox: fs.o super.o vnode.o
 
-vfs.bin: vfs.o
-	$(LD) -dN -Ttext $(ENTRY_USER) -o vfs.bin ../../lib/crt0.o vfs.o $(LIBS)
-	$(NM) -nC vfs.bin > vfs.map
-	$(ST) vfs.bin
-
-clean:
-	rm -f *.o *~ os.* core *.core *.s *.map *.bin
+include $(BLTHOME)make.actions

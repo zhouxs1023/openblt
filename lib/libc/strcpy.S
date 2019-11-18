@@ -13,8 +13,9 @@
  * cache.
  */
 
-.globl strcpy
-strcpy:
+#include <i386/asm.h>
+
+FUNCTION (strcpy)
 	movl	4(%esp),%ecx		/* dst address */
 	movl	8(%esp),%edx		/* src address */
 	pushl	%ecx			/* push dst address */

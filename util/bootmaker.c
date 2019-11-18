@@ -1,4 +1,4 @@
-/* $Id: //depot/blt/util/bootmaker.c#2 $
+/* $Id: //depot/blt/util/bootmaker.c#4 $
 **
 ** Copyright 1998 Brian J. Swetland
 ** All rights reserved.
@@ -31,9 +31,11 @@
 
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 static int make_floppy = 0;
 
@@ -140,16 +142,18 @@ unsigned int fix(unsigned int x)
 #define stLHS 3
 #define stRHS 4
 
+section *first = NULL;
+section *last = NULL;
+
 section *load_ini(char *file)
 {
     char *data,*end;
     int size;
     int state = stNEWLINE;
-    section *first, *last, *cur;
+	section *cur;
+	
     char *lhs,*rhs;
     
-    first = last = NULL;
-        
     if(!(data = loadfile(file,&size))){
         return NULL;
     }
@@ -281,8 +285,9 @@ void makeboot(section *s, char *outfile)
     while(s){
         char *type = getvaldef(s,"type","NONE");
         char *file = getval(s,"file");
-        int vsize = atoi(getvaldef(s,"vsize","0"));
+        int vsize;
         int size;
+        struct stat statbuf;
         
         if(!type) die("section %s has no type",s->name);
 
@@ -292,6 +297,10 @@ void makeboot(section *s, char *outfile)
         if(!file) die("section %s has no file",s->name);
         if(!(rawdata[c] = loadfile(file,&rawsize[c])))
            die("cannot load \"%s\"",file);
+
+        if(stat(file,&statbuf))
+            die("cannot stat \"%s\"",file);
+        vsize = statbuf.st_size;
         
         centry.be_size = rawsize[c] / 4096 + (rawsize[c] % 4096 ? 1 : 0);
         centry.be_vsize = 
@@ -350,25 +359,56 @@ void makeboot(section *s, char *outfile)
     
 }
 
-int main(int argc, char *argv[])
+int main(int argc, char **argv)
 {
+	char *file = NULL;
     section *s;
     
-    if(argc < 3){
-        fprintf(stderr,"usage: %s <inifile> <bootfile>\n",argv[0]);
+    if(argc < 2){
+usage:
+        fprintf(stderr,"usage: %s [ --floppy | -f ] [ <inifile> ... ] -o <bootfile>\n",argv[0]);
         return 1;
     }
 
+	argc--;
+	argv++;
+	
+	while(argc){
+		if(!strcmp(*argv,"--floppy")){
+			make_floppy = 1;
+		} else if(!strcmp(*argv,"-o")){
+			argc--;
+			argv++;
+			if(argc){
+				file = *argv;
+			} else {
+				goto usage;
+			}
+		} else {
+			if(load_ini(*argv) == NULL){
+				fprintf(stderr,"warning: cannot load '%s'\n",*argv);
+			}
+		}
+		argc--;
+		argv++;
+	}
+	
+	
     if((argc > 3) && !strcmp(argv[3],"-floppy")){
         make_floppy = 1;
     }
+
+	if(!file){
+		fprintf(stderr,"error: no output specified\n");
+		goto usage;
+	}
+	
+	if(!first){
+		fprintf(stderr,"error: no data to write?!\n");
+		goto usage;
+	}
+	
+	makeboot(first,file);
     
-    if(s = load_ini(argv[1])){
-        makeboot(s,argv[2]);
-    } else {
-        fprintf(stderr,"error: can't read %s\n",argv[1]);
-    }
-    
-    return 0;
-    
+    return 0;    
 }

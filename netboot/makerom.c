@@ -1,4 +1,4 @@
-/* $Id: //depot/blt/netboot/makerom.c#2 $
+/* $Id: //depot/blt/netboot/makerom.c#4 $
 **
 ** Copyright 1998 Brian J. Swetland
 ** All rights reserved.
@@ -25,15 +25,10 @@
 ** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 ** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
-/************************************************************************
 
-Program to put ROM checksum in ROM image.
-
-This program strips off the FreeBSD a.out header!
-
-************************************************************************/
 #include <stdio.h>
 #include <fcntl.h>
+#include <unistd.h>
 
 #define ROMSIZE 0x4000
 
@@ -53,34 +48,25 @@ void makehex(char *n)
             chk = 32;
 
             chk += ((l & 0xFF00) >> 8);
-/*            if(chk > 0xFF) chk = chk + (chk >> 8);*/
             chk += ((l & 0x00FF));
-/*            if(chk > 0xFF) chk = chk + (chk >> 8);*/
             
             for(i=0;i<32;i++){
                 fprintf(fp,"%02X",rom[l+i]);
                 chk += rom[l+i];
-/*                if(chk > 0xFF) chk = chk + (chk >> 8);*/
-                
             }
             chk &= 0xFF;
             chk2 = 0x100 - chk;
-                /*   if(chk + chk2) printf("ERR %02x + %02x != 0\n",chk,chk2);*/
             
             fprintf(fp,"%02X\r\n",(chk2 & 0xFF));
-            
         }
         fprintf(fp,":00000001FF\r\n");
         
         fclose(fp);
-        
-        
     }
 }
 
 
-main(argc,argv)
-	int argc; char *argv[];
+int main(int argc, char *argv[])
 {
 	int i, fd;
 	if (argc < 2) {
@@ -89,42 +75,31 @@ main(argc,argv)
 	}
 	if ((fd = open(argv[1], O_RDWR)) < 0) {
 		perror("unable to open file");
-		exit(2);
+		return 1;
 	}
 	bzero(rom, ROMSIZE);
-/*	if (lseek(fd, (off_t)32, SEEK_SET) < 0) {
-		perror("lseek error");
-		exit(2);
-	}*/
+	
 	if (read(fd, rom, ROMSIZE) < 0) {
 		perror("read error");
-		exit(2);
+		return 1;
 	}
+
+	/* store size in ROM header */	
+	rom[2] = ROMSIZE / 512;
+
+	/* store size in PCI ROM header */
+	rom[0x18 + 0x10 + 4] = ROMSIZE / 512;
+
 	rom[5] = 0;
-	for (i=0,sum=0; i<ROMSIZE; i++)
-		sum += rom[i];
+	for (i=0,sum=0; i<ROMSIZE; i++) sum += rom[i];
 	rom[5] = -sum;
-	for (i=0,sum=0; i<ROMSIZE; i++)
-		sum += rom[i];
-	if (sum & 0x00FF)
-		printf("checksum fails.\n");
-        close(fd);
-
-            /*
-	if (lseek(fd, (off_t)0, SEEK_SET) < 0) {
-		perror("unable to seek");
-		exit(2);
-	}
-	if (write(fd, rom, ROMSIZE) < 0) {
-		perror("unable to write");
-		exit(2);
-	}
+	
+	for (i=0,sum=0; i<ROMSIZE; i++) sum += rom[i];
+	if (sum & 0x00FF) printf("checksum fails.\n");
+	
 	close(fd);
-
-        printf("< %02x > \n", 0x4000 >> 9 );
-        */
-        makehex(argv[2]);
+	
+	makehex(argv[2]);
         
-	exit(0);
-        
+	return 0;
 }

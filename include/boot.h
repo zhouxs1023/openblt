@@ -1,4 +1,4 @@
-/* $Id: //depot/blt/include/boot.h#2 $
+/* $Id: //depot/blt/include/boot.h#3 $
 **
 ** Copyright 1998 Brian J. Swetland
 ** All rights reserved.
@@ -26,21 +26,27 @@
 ** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
+#ifndef _BOOT_H_
+#define _BOOT_H_
+
+#define BOOTDIR_NAMELEN         32
+#define BOOTDIR_MAX_ENTRIES     64
+#define BOOTDIR_DIRECTORY       "SBBB/Directory"
+
 typedef struct {
-    char be_name[32]; /* name of loaded object, zero terminated             */
-    int  be_offset;   /* offset of object relative to the start of boot_dir */
-    int  be_type;     /* object type designator                             */
-    int  be_size;     /* size of loaded object (pages)                      */
-    int  be_vsize;    /* size loaded object should occupy when mapped in    */
+    char be_name[BOOTDIR_NAMELEN]; /* name of loaded object, zero terminated */
+    int  be_offset;   /* offset of object relative to the start of boot_dir  */
+    int  be_type;     /* object type designator                              */
+    int  be_size;     /* size of loaded object (pages)                       */
+    int  be_vsize;    /* size loaded object should occupy when mapped in     */
     int  be_extra0;
     int  be_extra1;
     int  be_extra2;
     int  be_extra3;
 } boot_entry;
 
-
 typedef struct {
-    boot_entry bd_entry[64];
+    boot_entry bd_entry[BOOTDIR_MAX_ENTRIES];
 } boot_dir;
 
 /* void _start(uint32 mem, char *params, boot_dir *bd); */
@@ -55,3 +61,6 @@ typedef struct {
 /* for BE_TYPE_CODE */
 #define be_code_vaddr be_extra0 /* virtual address (rel offset 0)           */
 #define be_code_ventr be_extra1 /* virtual entry point (rel offset 0)       */
+
+#endif
+

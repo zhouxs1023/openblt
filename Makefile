@@ -1,51 +1,41 @@
-# $Id: //depot/blt/Makefile#3 $
-
+BLTHOME := .
 include make.conf
 
-all: lib kernel srv boot util image
+ifeq ($(BUILDLOG),)
+BUILDLOG := `pwd`/build.log
+endif
 
-boot:: 
-	@echo "--- boot ----------------"
-	@cd boot ; $(MAKE)
+SUBDIRS		:= lib kernel srv boot bin util
 
-kernel::
-	@echo "--- kernel --------------"
-	@cd kernel ; $(MAKE)
+image: log subdirs
+	./util/bootmaker $(INIFILES) $(LOCALINIFILES) -o boot/openblt.boot
 
-lib::
-	@echo "--- lib -----------------"
-	@cd lib ; $(MAKE)
+floppy: subdirs
+	./util/bootmaker $(INIFILES) $(LOCALINIFILES) -o boot/openblt.boot --floppy
 
-srv::
-	@echo "--- srv -----------------"
-	@cd srv ; $(MAKE)
+fimage: floppy
+	dd if=/dev/zero of=fd.img bs=1024 count=1440
+	dd if=boot/openblt.boot of=fd.img conv=notrunc
 
-util::
-	@echo "--- util ----------------"
-	@cd util ; $(MAKE)
-
-netboot::
-	@echo "--- netboot -------------"
-	@cd netboot ; $(MAKE)
-
-image:
-	./util/bootmaker boot/openblt.ini boot/openblt.boot
+bfloppy: floppy
+	dd if=boot/openblt.boot of=/dev/disk/floppy/raw bs=18k
+	
+lfloppy: floppy
+	dd if=boot/openblt.boot of=/dev/fd0 bs=18k
 
 run: image
 	./util/netboot boot/openblt.boot $(IP)
 
+go:
+	./util/bootmaker $(INIFILES) $(LOCALINIFILES) -o boot/openblt.boot
+	./util/netboot boot/openblt.boot $(IP)
 
-image2:
-	./util/bootmaker boot/test.ini boot/test.boot
+all:: log
 
-run2: image2
-	./util/netboot boot/test.boot $(IP)
+log::
+	@echo "### `date`" > $(BUILDLOG)
 
-clean:
-	@cd lib ; $(MAKE) clean
-	@cd kernel ; $(MAKE) clean
-	@cd srv ; $(MAKE) clean
-	@cd boot ; $(MAKE) clean
-	@cd netboot ; $(MAKE) clean
+clean::
 	@rm -f boot/openblt.boot
 
+include make.actions

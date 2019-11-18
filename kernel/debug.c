@@ -1,29 +1,5 @@
-/* $Id: //depot/blt/kernel/debug.c#3 $
-**
-** Copyright 1998 Brian J. Swetland
-** All rights reserved.
-**
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions, and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions, and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
-**
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+/* Copyright 1998-1999, Brian J. Swetland. All rights reserved.
+** Distributed under the terms of the OpenBLT License
 */
 
 #ifndef KDEBUG
@@ -36,49 +12,90 @@
 #include "port.h"
 #include "rights.h"
 #include "resource.h"
-typedef struct { uint32 edi, esi, ebp, esp, ebx, edx, ecx, eax; } regs;
+#include "list.h"
+#include "i386.h"
 
-
-extern resnode_t *resource_list;
-
+extern list_t resource_list;
 
 #define RMAX 1024
 
 static char *tstate[] =
-{ "KERNL", "RUNNG", "READY", "DEAD ", "S/PRT", "S/IRQ", "S/TMR", "S/SEM"};
+{ "KERNL", "RUNNG", "READY", "DEAD ", "WAIT ", "S/IRQ", "S/TMR", "S/PAG" };
 
+uint32 readnum(const char *s);
+
+char *taskstate(task_t *task)
+{
+	static char ts[60];
+	if(task->waiting_on){
+		snprintf(ts,60,"Waiting on %s #%d \"%s\"",
+				 rsrc_typename(task->waiting_on), task->waiting_on->id,
+				 task->waiting_on->name);
+		return ts;
+	} else {
+		return "Running";
+	}
+}
 
 void printres(resource_t *r)
 {
     switch(r->type){
     case RSRC_PORT:
-        kprintf("    PORT %U: (slave %U) (size %U)",r->id,
-		((port_t*)r)->slaved, ((port_t*)r)->msgcount);
+        kprintf("    PORT %U: (slave=%d) (size=%d) \"%s\"",r->id,
+		((port_t*)r)->slaved, ((port_t*)r)->msgcount,r->name);
         break;
     case RSRC_TASK:
-        kprintf("    TASK %U: (state %s/%U) '%s'",r->id,
-		tstate[((task_t*)r)->flags],
-                ((task_t*)r)->sleeping_on, ((task_t*)r)->name);
+        kprintf("    TASK %U: \"%s\"",r->id,r->name);		
+		kprintf("             : %s",taskstate((task_t*)r));
         break;
     case RSRC_ASPACE:
-        kprintf("  ASPACE %U: @ %x",r->id,((aspace_t*)r)->ptab[0]&0xFFFFF000);
+        kprintf("  ASPACE %U: @ %x",r->id,((aspace_t*)r)->pdir[0]&0xFFFFF000);
         break;
     case RSRC_RIGHT:
         kprintf("   RIGHT %U: %x",r->id,((right_t*)r)->flags);
         break;
     case RSRC_SEM:
-        kprintf("     SEM %U: (count %U)",r->id,((sem_t*)r)->count);
+        kprintf("     SEM %U: (count=%d) \"%s\"",
+				r->id,((sem_t*)r)->count,r->name);
         break;
+    case RSRC_AREA:
+        kprintf("    AREA %U: virt %x size %x pgroup %x (refcnt=%d)",r->id,
+                ((area_t*)r)->virt_addr * 0x1000, ((area_t*)r)->length * 0x1000,
+                ((area_t*)r)->pgroup, ((area_t*)r)->pgroup->refcount);
+		break;
+	case RSRC_QUEUE:
+		kprintf("   QUEUE %U: (count=%d) \"%s\"",r->id,r->queue.count,r->name);
+		break;
+	case RSRC_TEAM:
+		kprintf("    TEAM %U: \"%s\"",r->id,r->name);
+		break;
     }
 }
 
-void dumprsrc(resnode_t *rn)
+void dumprsrc(list_t *rl)
 {
-	while(rn) {
-		printres(rn->resource);
+	node_t *rn = rl->next;
+	while(rn != (node_t*) rl) {
+		printres((resource_t*)rn->data);
 		rn = rn->next;
 	}
-	
+}
+
+void dumponersrc(const char *num)
+{
+	int n;
+	node_t *rn;
+
+	n = readnum (num);
+	rn = resource_list.next;
+	while(rn != (node_t*) &resource_list) {
+		if (((resource_t*)rn->data)->id == n) {
+			printres((resource_t*) rn->data);
+			break;
+		} else {
+			rn = rn->next;
+		}
+	}
 }
 
 void dumptasks(void)
@@ -86,49 +103,30 @@ void dumptasks(void)
     int i,j,n;
     task_t *t;
     aspace_t *a;
-    
-    kprintf("Task Prnt Addr State Wait brk      Name");
-    kprintf("---- ---- ---- ----- ---- -------- --------------------------------");
+    team_t *team;
+	
+    kprintf("Task Team Aspc State Wait esp      scount   Name");
+    kprintf("---- ---- ---- ----- ---- -------- -------- --------------------------------");
 
     for(i=1;i<RMAX;i++){
         if((t = rsrc_find_task(i))){
-            a = t->addr;
-            for(j=0;a->ptab[j] && j < 1024;j++);
-            
-            kprintf("%U %U %U %s %U %x %s",
-                    i,t->rsrc.owner->rsrc.id,t->addr->rsrc.id,tstate[t->flags],
-			t->sleeping_on,j*4096,t->name);
+            team = t->rsrc.owner;
+            a = team->aspace;
+            {
+                area_t *area = rsrc_find_area(t->rsrc.owner->heap_id);
+                if(area) j = area->virt_addr + area->length;
+                else j =0;
+            }
+			
+            kprintf("%U %U %U %s %U %x %x %s",
+                    i,team->rsrc.id,a->rsrc.id,tstate[t->flags],
+			(t->waiting_on ? t->waiting_on->id : 0),t->esp /*j*4096*/,t->scount,
+					t->rsrc.name);
             
         }
     }
 }
 
-void dumptask(int id)
-{
-    int i,j,n;
-    task_t *t;
-    aspace_t *a;
-
-	if(!(t = rsrc_find_task(id))) {
-		kprintf("no such task %X",id);
-		return;
-	}
-	
-    
-    kprintf("Task Prnt Addr State Wait brk      Name");
-    kprintf("---- ---- ---- ----- ---- -------- --------------------------------");
-
-	a = t->addr;
-	for(j=0;a->ptab[j] && j < 1024;j++);
-	
-	kprintf("%U %U %U %s %U %x %s",
-	id,t->rsrc.owner->rsrc.id,t->addr->rsrc.id,tstate[t->flags],
-	t->sleeping_on,j*4096,t->name);
-	
-
-	kprintf("");
-	dumprsrc(t->resources);
-}
 
 void dumpports()
 {
@@ -141,8 +139,8 @@ void dumpports()
     for(i=1;i<RMAX;i++){
         if((p = rsrc_find_port(i))){
             kprintf("%U %U %U %U %U %s",
-                    i, p->rsrc.owner->rsrc.id, 0, p->slaved, p->msgcount,
-					p->rsrc.owner->name);
+                    i, p->rsrc.owner->rsrc.id, p->restrict, p->slaved,
+                    p->msgcount, p->rsrc.owner->rsrc.name);
         }
     }
 
@@ -164,11 +162,10 @@ static void trace(uint32 ebp,uint32 eip)
 }
 
 
-static void dump(int addr, int sections)
+static void dump(uint32 addr, int sections)
 {
     int i;
     unsigned char *x;
-    if(addr < 0) return;
     
     for(i=0;i<sections;i++){
         x = (unsigned char *) (addr + 16*i);
@@ -178,17 +175,18 @@ static void dump(int addr, int sections)
     }
 }
 
-static char *hex = "01234567890abcdef";
+static char *hex = "0123456789abcdef";
 
-int readhex(char *s)
+#define atoi readhex
+uint32 readhex(const char *s)
 {
-    int n=0;
+    uint32 n=0;
     char *x;
     while(*s) {
         x = hex;
         while(*x) {
             if(*x == *s){
-                n = n*10 + (x - hex);
+                n = n*16 + (x - hex);
                 break;
             }
             x++;
@@ -196,7 +194,18 @@ int readhex(char *s)
         s++;
     }
     return n;
-    
+}
+
+uint32 readnum(const char *s)
+{
+	uint32 n=0;
+	if((*s == '0') && (*(s+1) == 'x')) return readhex(s+2);
+	//while(isdigit(*s)) {
+	while(*s) {
+		n = n*10 + (*s - '0');
+		s++;
+	}
+	return n;
 }
 
 void reboot(void)
@@ -209,6 +218,8 @@ extern aspace_t *flat;
 
 void dumpaddr(int id)
 {
+    node_t *an;
+	area_t *area;
 	aspace_t *a = rsrc_find_aspace(id);
 	
 	if(id == 0){
@@ -217,40 +228,213 @@ void dumpaddr(int id)
 	}
 	
 	if(!a) {
-		kprintf("no such aspace %X\n",id);
+		kprintf("no such aspace %d",id);
 		return;
 	}
 	
-	aspace_print(a);	
+	aspace_print(a);
+    for(an = a->areas.next; an != (node_t *) &a->areas; an = an->next){
+		area = (area_t*) an->data;
+		
+        kprintf("area %U virtaddr %x size %x pgroup %x (refcnt=%d)",
+                area->rsrc.id, 
+                area->virt_addr * 0x1000, 
+                area->length * 0x1000, 
+                area->pgroup, area->pgroup->refcount);
+    }
+    	
 }
 
 void memory_status(void);
 void print_regs(regs *r, uint32 eip, uint32 cs, uint32 eflags);
 
+void dumpteams(void)
+{
+	node_t *rn = resource_list.next;
+	resource_t *rsrc;
+	
+	while(rn != (node_t*) &resource_list) {
+		rsrc = (resource_t*)rn->data;
+		if(rsrc->type == RSRC_TEAM){
+			kprintf("Team %d (%s)",rsrc->id,rsrc->name);
+		}
+		rn = rn->next;
+	}	
+}
+
+void dumpteam(int id)
+{
+	node_t *rn;
+	
+	team_t *team = rsrc_find_team(id);
+	if(team){
+		kprintf("team %d (%s)...",team->rsrc.id,team->rsrc.name);
+		rn = team->resources.next;
+		while(rn != (node_t*) &team->resources) {
+			printres((resource_t*) rn->data);
+			rn = rn->next;
+		}	
+	} else {
+		kprintf("no such team %d",id);
+	}
+	
+}
+
+void dumpqueue(int num)
+{
+	resource_t *rsrc;
+	node_t *n;
+	
+	int i;
+	
+	for(i=1;i<RSRC_MAX;i++){
+		if(rsrc = rsrc_find(i,num)){
+			task_t *task;
+			kprintf("resource: %d \"%s\"",rsrc->id,rsrc->name);
+			kprintf("type    : %s",rsrc_typename(rsrc));
+			if(rsrc->owner){
+				kprintf("owner   : %d \"%s\"",
+						rsrc->owner->rsrc.id,rsrc->owner->rsrc.name);
+			}			
+			kprintf("count   : %d",rsrc->queue.count);
+
+			for(n = rsrc->queue.next; n != (node_t*) &rsrc->queue; n = n->next){
+				kprintf("queue   : task %d \"%s\"",((task_t*)n->data)->rsrc.id,
+						((task_t*)n->data)->rsrc.name);
+			}
+			return;
+		}
+	}
+	kprintf("no such resource %d",n);
+}
+
+static int ipchksum(unsigned short *ip, int len)
+{
+	unsigned long sum = 0;
+
+	len >>= 1;
+	while (len--) {
+		sum += *(ip++);
+		if (sum > 0xFFFF)
+		sum -= 0xFFFF;
+	}
+	return((~sum) & 0x0000FFFF);
+}
+
+void checksum (char *range)
+{
+	char *s;
+	unsigned int i, good, begin, end;
+
+	if (!*range)
+		return;
+	for (i = good = 0; (i < strlen (range)) && !good; i++)
+	{
+		if (range[i] == ' ')
+		{
+			*(s = range + i) = 0;
+			s++;
+			good = 1;
+		}
+	}
+	if ((!good) || !*s)
+		return;
+	begin = atoi (range);
+	end = atoi (s);
+	kprintf ("%x", ipchksum ((unsigned short *) begin, end - begin));
+}
+
+static void dumppgroup(uint32 addr)
+{
+	pagegroup_t *pg = (pagegroup_t*) addr;
+	phys_page_t *pp = pg->pages;
+	node_t *an = pg->areas.next;
+	int size = pg->size;
+	
+	kprintf("pgroup @ 0x%x rc=%d sz=%d",addr,pg->refcount,pg->size);
+	while(an != (node_t*) &pg->areas){
+		kprintf("  area @ 0x%x (id %d) (owner #%d \"%s\")",
+				an->data,((area_t*)an->data)->rsrc.id,
+				((area_t*)an->data)->rsrc.owner->rsrc.id,
+				((area_t*)an->data)->rsrc.owner->rsrc.name);
+		an = an->next;
+	}
+	while(size > 0){
+		kprintf("  pages %U %U %U %U %U %U",
+				pp->addr[0],pp->addr[1],pp->addr[2],
+				pp->addr[3],pp->addr[4],pp->addr[5]);
+		size -= 6;
+		pp = pp->next;
+	}
+}
+
+int findpage(uint32 n)
+{
+	node_t *rn = resource_list.next;
+	resource_t *rsrc;
+	int count = 0;
+	int size,i;
+	
+	while(rn != (node_t*) &resource_list) {
+		rsrc = (resource_t*)rn->data;
+		if(rsrc->type == RSRC_AREA){
+			area_t *area = (area_t*) rsrc;
+			phys_page_t *pp = area->pgroup->pages;
+			size = area->pgroup->size;
+			while(size > 0){
+				for(i=0;i<6;i++,size--){
+					if(pp->addr[i] == n){
+						kprintf("area %U pgroup %x slot %d",rsrc->id,area->pgroup,i);
+						count ++;
+					}
+				}
+				pp = pp->next;
+			}
+		}
+		rn = rn->next;
+	}	
+	return count;
+}
+
+static char linebuf[80];
 void k_debugger(regs *r,uint32 eip, uint32 cs, uint32 eflags)
 {
-    char linebuf[80];
     char *line;
-    
+    uint32 n;
+	
     kprintf("OpenBLT Kernel Debugger");
 
     for(;;){
         krefresh();
         line = kgetline(linebuf,80);
 
-        if(!strcmp(line,"resources")) { dumprsrc(resource_list); continue; }
+		if(!strncmp(line,"pgroup ",7)) { dumppgroup(readnum(line+7)); continue; }
+        if(!strncmp(line,"resource ", 9)) { dumponersrc(line+9); continue; }
+        if(!strcmp(line,"resources")) { dumprsrc(&resource_list); continue; }
+		if(!strncmp(line,"queue ",6)) { dumpqueue(readnum(line+6)); continue; }
         if(!strcmp(line,"tasks")) { dumptasks(); continue; }
-        if(!strncmp(line,"task ",5)) { dumptask(readhex(line+5)); continue; }
         if(!strcmp(line,"ports")) { dumpports(); continue; }
         if(!strcmp(line,"memory")) { memory_status(); continue; }
         if(!strcmp(line,"trace")) { trace(r->ebp,eip); continue; }
         if(!strcmp(line,"regs")) { print_regs(r,eip,cs,eflags); continue; }
-        if(!strncmp(line,"dump ",5)) { dump(readhex(line+5),16); continue; }
-        if(!strncmp(line,"aspace ",7)) { dumpaddr(readhex(line+7)); continue; }
+        if(!strncmp(line,"dump ",5)) { dump(readnum(line+5),16); continue; }
+        if(!strncmp(line,"aspace ",7)) { dumpaddr(readnum(line+7)); continue; }
         if(!strcmp(line,"reboot")) { reboot(); }
+        if(!strncmp(line,"checksum ",9)) { checksum(line+9); continue; }
+		if(!strncmp(line,"team ",5)) { dumpteam(readnum(line+5)); continue; }
+		if(!strncmp(line,"find ",5)) { findpage(readnum(line+5)); continue; }
+		if(!strcmp(line,"teams")) { dumpteams(); continue; }
+		
         if(!strcmp(line,"exit")) break;
+        if(!strcmp(line,"x")) break;
+        if(!strcmp(line,"c")) break;
     }
 }
 
+void DEBUGGER(void)
+{
+	regs r;
+	k_debugger(&r, 0, 0, 0);
+}
 
 #endif   

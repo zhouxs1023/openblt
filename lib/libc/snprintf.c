@@ -44,17 +44,30 @@ static char hexmap[] = {
 void va_snprintf(char *b, int l, char *fmt, va_list pvar) 
 {
     int n,i;
-    unsigned u;    
-    char *t,d[10];    
+    unsigned u;
+    unsigned long long ull;
+    char *t,d[10], mod_l, mod_ll;
 
-    if(!fmt || !b || (l < 1)) return; 
-    
+    if(!fmt || !b || (l < 1)) return;
+
+    mod_l = mod_ll = 0;    
     while(l && *fmt) {
         if(*fmt == '%'){
-            fmt++;
             if(!(--l)) break;
+        again:
+            fmt++;
             
             switch(*fmt){
+            case 'l': /* long modifier */
+                if (!mod_l)
+                    mod_l = 1;
+                else if (!mod_ll)
+                {
+                    mod_l = 0;
+                    mod_ll = 1;
+                }
+                goto again;
+
             case 's': /* string */
                 t = va_arg(pvar,char *);
                 while(l && *t) *b++ = *t++, l--;                
@@ -64,16 +77,41 @@ void va_snprintf(char *b, int l, char *fmt, va_list pvar)
                 *b++ = va_arg(pvar,char);
                 l--;                
                 break;
-                
-            case 'x': /* 8 digit, unsigned 32bit hex integer */
-                if(l < 8) { l = 0; break; }
-                u = va_arg(pvar,unsigned int);
-                for(i=7;i>=0;i--){
-                    b[i] = hexmap[u & 0x0F];
-                    u >>= 4;
+
+			case 'S': /* uint32 as a short ... */
+				if(l < 4) { l = 0; break; }
+				u = va_arg(pvar,unsigned int);
+				for(i=3;i>=0;i--){
+					b[i] = hexmap[u & 0x0F];
+					u >>= 4;
+				}
+				b+=4;
+				l-=4;
+				break;            
+   
+			case 'x':
+			case 'p':
+                if (!mod_ll) { /* 8 digit, unsigned 32-bit hex integer */
+                    if(l < 8) { l = 0; break; }
+                    u = va_arg(pvar,unsigned int);
+                    for(i=7;i>=0;i--){
+                        b[i] = hexmap[u & 0x0F];
+                        u >>= 4;
+                    }
+					b+=8;
+					l-=8;
                 }
-                b+=8;
-                l-=8;                
+                else if (mod_ll) { /* 16 digit, unsigned 64-bit hex integer */
+                    if (l < 16) { l = 0; break; }
+                    ull = va_arg (pvar, unsigned long long);
+                    for (i = 15; i >= 0; i--) {
+                        b[i] = hexmap[ull & 0x0f];
+                        ull >>= 4;
+                    }
+                    b += 16;
+                    l -= 16;
+                }
+                mod_l = mod_ll = 0;
                 break;
 
             case 'd': /* signed integer */

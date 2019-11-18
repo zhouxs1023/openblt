@@ -1,4 +1,4 @@
-/* $Id: //depot/blt/include/stddef.h#1 $
+/* $Id: //depot/blt/include/stddef.h#2 $
 **
 ** Copyright 1998 Sidney Cammeresi
 ** All rights reserved.
@@ -28,6 +28,8 @@
 
 #ifndef _STDDEF_H_
 #define _STDDEF_H_
+
+#define NULL ((void *) 0)
 
 #endif
 

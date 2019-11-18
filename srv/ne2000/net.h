@@ -1,4 +1,4 @@
-/* $Id: //depot/blt/srv/ne2000/net.h#2 $
+/* $Id: //depot/blt/srv/ne2000/net.h#4 $
 **
 ** Copyright 1998 Brian J. Swetland
 ** All rights reserved.
@@ -26,10 +26,6 @@
 ** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 #pragma pack(2)
-
-typedef unsigned char uint8;
-typedef unsigned short uint16;
-typedef unsigned int uint32;
 
 typedef struct 
 {
@@ -101,6 +97,12 @@ typedef struct
     net_ip ip;
     unsigned char data[0];
 } ip_packet;
+
+typedef struct {
+    net_ether ether;
+    net_ip ip;
+/* stub for now */
+} tcp_packet;
 
 typedef struct {
     net_ether ether;

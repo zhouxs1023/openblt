@@ -1,29 +1,5 @@
-/* $Id: //depot/blt/kernel/task.c#2 $
-**
-** Copyright 1998 Brian J. Swetland
-** All rights reserved.
-**
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions, and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions, and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
-**
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+/* Copyright 1998-1999, Brian J. Swetland. All rights reserved.
+** Distributed under the terms of the OpenBLT License
 */
 
 #include "kernel.h"
@@ -31,48 +7,161 @@
 #include "task.h"
 
 extern char *gdt;
+extern int live_tasks;
+
+void thread_bootstrap(void);
+void kthread_bootstrap(void);
+
+void task_wake(task_t *task, int status)
+{
+	task->status = status;
+	rsrc_enqueue(run_queue, task);
+}
+
+int wait_on(resource_t *rsrc)
+{
+	task_t *task = current;
+	task->status = 0;
+	rsrc_enqueue(rsrc, task);	
+	swtch();
+	return current->status;
+}
+
+void task_destroy(task_t *task)
+{
+	team_t *team = task->rsrc.owner;
+	
+	if(task == current) panic("cannot destroy the running task");
+	
+	TCLRMAGIC(task);
+	
+	if(task->stack_area) {
+		area_destroy(team->aspace, task->stack_area->rsrc.id);
+	}
+	
+	kfreepage(task->kstack);
+	rsrc_release(&task->rsrc);
+	kfree(task_t, task);
+	
+	team->refcount--;
+	if(team->refcount == 0) team_destroy(team);
+}
 
 /* create a new task, complete with int stack */
-task_t *task_create(aspace_t *a, uint32 ip, uint32 sp, int kernel) 
+task_t *task_create(team_t *team, uint32 ip, uint32 sp, int kernel) 
 {
-    task_t *t = kmalloc128();
+    task_t *t = kmalloc(task_t);	
+	uint32 *SP;
 	
-	t->tss = (TSS *) kgetpages(1,7);
-    
-    t->tss->esp0 = (uint32) ( ((char *) t->tss) + 4092 );
-    t->tss->ss0  = SEL_KDATA;
-    t->tss->eax = 0xDEADBEEF;
-    t->tss->ebx = 0xDEADBEEF;
-    t->tss->ecx = 0xDEADBEEF;
-    t->tss->edx = 0xDEADBEEF;
-    t->tss->esp1 = t->tss->esp2 = t->tss->ss1 = t->tss->ss2 = 0;
-    t->tss->cr3  = (((uint32) a->pdir[0]) & 0xFFFFFF00) - 4096;
-    t->tss->eip  = (uint32) ip;
-    t->tss->eflags =/* EXTREME!  0x4202 */ 0x7202;
-    t->tss->esp  = (uint32) sp;
-    t->tss->cs   = ( kernel ? (SEL_KCODE) : (SEL_UCODE | 3) );
-    t->tss->ds = t->tss->es = t->tss->ss =
-        t->tss->fs = t->tss->gs = (kernel ? SEL_KDATA : (SEL_UDATA | 3) );
-    t->tss->ldts = t->tss->debugtrap = t->tss->iomapbase = 0;
-	t->resources = NULL;
-    t->addr = a;
-    
-/*    i386SetSegment(gdt + t->tid,        
-                   (uint32) t, 104,
-                   i386rPRESENT | (kernel ? i386rDPL0 : i386rDPL3) | i386rTSS,
-                   0);
-                   */
-    
-    t->name[0] = 0;
+	t->kstack = kgetpages(1);
+	t->cr3 = team->aspace->pdirphys;
+	
+	t->esp = (uint32) ( ((char *) t->kstack) + 4092 );
+	t->esp0 = t->esp;
+	t->scount = 0;
+	t->stack_area = NULL;
+	t->team = team;
+	
+	t->node.data = t;
+	
+	/* prep the kernel stack for first switch 
+	** SS
+	** ESP
+	** EFLAGS
+	** CS
+	** EIP            -- thread_bootstrap will iret into the thread 
+	**
+	** <thread_bootstrap>
+	** EFLAGS 
+	** EBP (0)
+	** ESI (0)
+	** EDI (0)        -- stuff for _context_switch to pop off / return to
+	** EBX (0)
+	*/
+	
+	SP = (uint32*) t->esp;
+	
+	if(kernel) {
+		SP--; *SP = SEL_KDATA; 
+		SP--; *SP = sp - 4*5;
+		SP--; *SP = 0x3202;
+		SP--; *SP = SEL_KCODE;
+		SP--; *SP = ip;
+		SP--; *SP = (uint32) thread_bootstrap;
+	} else {
+		SP--; *SP = SEL_UDATA | 3; 
+		SP--; *SP = sp - 4*5;
+		SP--; *SP = 0x3202;
+		SP--; *SP = SEL_UCODE | 3;
+		SP--; *SP = ip;
+		SP--; *SP = (uint32) thread_bootstrap;
+	}	
+	SP--; *SP = 0x3002;
+	SP--; *SP = 0;
+	SP--; *SP = 0;
+	SP--; *SP = 0;
+	SP--; *SP = 0;
+	
+	t->esp = (uint32) SP;
+	
+//	kprintf("thr:%x/%x:%d",sp,ip,(kernel ? SEL_KCODE : (SEL_UCODE | 3)));
+	
     t->irq = 0;
-    
+    t->flags = tREADY;
+	t->waiting_on = NULL;
+	team->refcount++;
+	
+	TSETMAGIC(t);
     return t;
 }
 
-void task_call(task_t *t)
+
+int thr_wait(int thr_id)
 {
-    uint32 sel[2]; 
-    sel[1] = SEL_UTSS /*t->tid*/;    
-    __asm__("lcall %0; clts"::"m" (*sel));
+	task_t *task = rsrc_find_task(thr_id);
+	
+	if(task) {
+		wait_on((resource_t *)task);
+		return ERR_NONE;
+	} else {
+		return ERR_RESOURCE;
+	}
 }
+
+int thr_spawn(uint32 ip, uint32 sp, 
+			  uint32 area0, uint32 vaddr0, 
+			  uint32 area1, uint32 vaddr1,
+			  const char *name)
+{
+	aspace_t *aspace;
+	task_t *task;
+	team_t *team;
+	area_t *area;
+	int id;
+	void *addr;
+	
+	team = team_create();
+	aspace = team->aspace;
+	task = task_create(team, ip, sp, 0);
+	task->ustack = 0;
+	rsrc_bind(&task->rsrc, RSRC_TASK, team);
+
+	id = area_clone(aspace, area0, vaddr0, &addr, 0);
+	team->heap_id = id;
+	
+	if(area = rsrc_find_area(id)) {
+		rsrc_set_owner(&area->rsrc, team);
+	}
+	
+	id = area_clone(aspace, area1, vaddr1, &addr, 0);
+	if(area = rsrc_find_area(id)) rsrc_set_owner(&area->rsrc, team);
+
+	rsrc_set_name(&task->rsrc, name);
+	rsrc_set_name(&team->rsrc, name);
+	rsrc_enqueue(run_queue, task);
+	live_tasks++;
+	
+	return task->rsrc.id;
+}
+
 

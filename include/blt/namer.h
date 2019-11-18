@@ -1,47 +1,27 @@
-/* $Id: //depot/blt/include/blt/namer.h#2 $
-**
-** Copyright 1998 Brian J. Swetland
-** All rights reserved.
-**
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions, and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions, and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
-**
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+/* Copyright 1999, Brian J. Swetland. All rights reserved.
+** Distributed under the terms of the OpenBLT License
 */
 
 #ifndef _NAMER_H_
 #define _NAMER_H_
 
+#include <blt/types.h>
+
 #define NAMER_PORT 1
-#define NAMER_TEXT_MAX 32
 
-typedef struct _namer_message_t
-{
-    int number;
-    char text[NAMER_TEXT_MAX];    
-} namer_message_t;
+#define NAMER_FIND      1
+#define NAMER_REGISTER  2
 
-int namer_newhandle(void);
-int namer_delhandle(int nh);
-int namer_register(int nh, int port, char *name);
-int namer_find(int nh, char *name);
+#ifdef __cplusplus
+extern "C" {
+#endif
 
+int namer_register(int port, const char *name);
+int namer_find(const char *name, int blocking);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif
+

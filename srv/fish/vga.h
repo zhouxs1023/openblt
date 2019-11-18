@@ -1,4 +1,4 @@
-/* $Id: //depot/blt/srv/fish/vga.h#2 $
+/* $Id: //depot/blt/srv/fish/vga.h#3 $
 **
 ** Copyright 1998 Brian J. Swetland
 ** All rights reserved.
@@ -41,6 +41,7 @@ void vga_fill(int w, int h, int x, int y, int c);
 void vga_fill_grad(int w, int h, int x, int y);
 
 void vga_set_vram(void *addr);
+void vga_set_sram(void *addr);
 void vga_swap_buffers(void);
 void vga_fillX(void);
 void vga_modex(unsigned int w);

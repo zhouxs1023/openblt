@@ -1,31 +1,8 @@
-/* $Id: //depot/blt/kernel/kernel.c#8 $
-**
-** Copyright 1998 Brian J. Swetland
-** All rights reserved.
-**
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions, and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions, and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
-**
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+/* Copyright 1998-1999, Brian J. Swetland. All rights reserved.
+** Distributed under the terms of the OpenBLT License
 */
 
+#include <blt/os.h>
 #include "kernel.h"
 #include "memory.h"
 #include "boot.h"
@@ -36,18 +13,19 @@
 #include "resource.h"
 #include "aspace.h"
 #include "task.h"
-#include "queue.h"
 #include "smp.h"
+#include "team.h"
+#include "pager.h"
 
-#include "assert.h"
+void DEBUGGER(void);
 
 void restore_idt(void);
 void init_idt(char *idt);
 
-unsigned char IP[4];
-
-aspace_t *flat;
-boot_dir *bdir;
+void _context_switch(uint32 *old_stack, uint32 new_stack, uint32 pdbr);
+ 
+aspace_t *flat = NULL;
+boot_dir *bdir = NULL;
 
 char *idt;
 char *gdt;
@@ -61,55 +39,14 @@ uint32 _cr3;
 task_t *idle_task;
 int live_tasks = 0;
 
-queue_t *run_queue;
+resource_t *run_queue, *timer_queue, *reaper_queue;
+team_t *kernel_team = NULL;
+int reaper_sem;
 
 uint32 memsize; /* pages */
 uint32 memtotal;
 
-static uint32 nextentry = 9*8;
-static uint32 nextmem = 0x80400000 - 3*4096;
-static int uberportnum = 0;
-
-uint32 getgdtentry(void)
-{
-    nextentry += 8;    
-    return nextentry;
-}
-
-/* return phys page number of first page of allocated group */
-uint32 getpages(int count)
-{
-    memsize -= count;
-    Assert(memsize > 512);
-    
-    return memsize;
-}
-
-/* alloc count physical pages, map them into kernel space, return virtaddr AND phys */
-void *kgetpages2(int count, int flags, uint32 *phys)
-{
-    nextmem -= 4096*count;
-    *phys = getpages(count);
-    aspace_maphi(flat, *phys, nextmem/0x1000, count, flags);
-    *phys *= 4096;
-    return (void *) nextmem;
-}
-
-/* alloc count physical pages, map them into kernel space, return virtaddr */
-void *kgetpages(int count, int flags)
-{
-    nextmem -= 4096*count;
-    aspace_maphi(flat, getpages(count), nextmem/0x1000, count, flags); 
-    return (void *) nextmem;
-}
-
-/* map specific physical pages into kernel space, return virtaddr */
-void *kmappages(int phys, int count, int flags)
-{
-    nextmem -= 4096*count;
-    aspace_maphi(flat, phys, nextmem/0x1000, count, flags); 
-    return (void *) nextmem;
-}
+static int uberportnum = 0, uberareanum = 0;
 
 void destroy_kspace(void)
 {
@@ -126,6 +63,7 @@ void panic(char *reason)
 {
     kprintf("");
     kprintf("PANIC: %s",reason);    
+	DEBUGGER();
     asm("hlt");    
 }
 
@@ -136,14 +74,28 @@ void idler(void)
     }    
 }
 
-static aspace_t _flat;
-
-void init_kspace(void)
+void reaper(void)
 {
-    TSS *ktss;
+	task_t *task;
+	
+	asm("cli");	/* XXX race condition? */
+	for(;;){
+		sem_acquire(reaper_sem);
+		task = rsrc_dequeue(reaper_queue);		
+//		kprintf("reaper reclaiming thread #%d (%s)",task->rsrc.id,task->rsrc.name);
+		task_destroy(task);
+	}
+	
+}
+
+static aspace_t _flat;
+static TSS *ktss;
+
+void init_kspace(int membottom)
+{
 	uint32 *raw;
 	
-    /* there's an existing aspace at 0xB03FD000 that was initialized
+    /* there's an existing aspace at vaddr 0x803FD000 that was initialized
        by the 2nd stage loader */
 	raw = (uint32 *) 0x803FD000;
     flat = &_flat;
@@ -154,21 +106,24 @@ void init_kspace(void)
 	
     memsize -= 3; /* three pages already in use */
     
-    toppage = (char *) kgetpages(3,3);
-    gdt = (char *) kgetpages(1,3);
-    rsrc_init(kgetpages(6,3),4096*6);
-    memory_init();
+    memory_init(membottom, memsize);
+
+	
+    toppage = (char *) kgetpages(3); /* kernel startup stack */
+    gdt = (char *) kgetpages(1);
+    rsrc_init(kgetpages(6),4096*6);
     
 
-	kernel = (task_t *) kmalloc128();
-	kernel->tss = (ktss = (TSS *) kgetpages(1,3));
+	kernel = (task_t *) kmalloc(task_t);
+	ktss = (TSS *) kgetpages(1);
     kernel->flags = tKERNEL;
 	kernel->rsrc.id = 0;
 	kernel->rsrc.owner = NULL;
-	kernel->rsrc.rights = NULL;
+	list_init(&kernel->rsrc.rights);
+	list_init(&kernel->rsrc.queue);
     current = kernel;
 
-    init_idt(idt = kgetpages(1,3));      /* init the new idt, save the old */
+    init_idt(idt = kgetpages(1));              /* init the new idt, save the old */
     gdt2 = (void *) i386sgdt(&gdt2len);        /* save the old gdt */
 
     i386SetSegment(gdt + SEL_KCODE,      /* #01 - 32bit DPL0 CODE */
@@ -207,58 +162,55 @@ void init_kspace(void)
     
         /* setup the kernel TSS to insure that it's happy */
     ktss->cs = SEL_KCODE;
-    ktss->ds = ktss->es = ktss->ss = ktss->fs = ktss->gs = SEL_KDATA;
+    ktss->ds = ktss->es = ktss->ss = ktss->fs = ktss->gs = SEL_KDATA; 
     ktss->ldts = ktss->debugtrap = ktss->iomapbase = 0;
     ktss->cr3 = _cr3;
+	ktss->ss0 = SEL_KDATA;
+    ktss->esp1 = ktss->esp2 = ktss->ss1 = ktss->ss2 = 0;
     i386ltr(SEL_KTSS);
-
-    run_queue = queue_new(0);    
 }
 
-
-void preempt(void)
+/* current is running -- we want to throw it on the run queue and
+   transfer control to the preemptee */
+void preempt(task_t *task, int status)
 {
-    current->flags = tREADY;
+	uint32 *savestack = &(current->esp);
 
-    current = queue_peekHead(run_queue);
+	/* current thread MUST be running, requeue it */	
+	if(current != idle_task) rsrc_enqueue(run_queue, current);
+
+	TCHKMAGIC(task);
+	if(task == (task_t *)tDEAD) panic("The dead have returned!");
+	
+	/* transfer control to the preemtee -- it had better not be on any queues */	
+    current = task;
+	current->status = status;
     current->flags = tRUNNING;
-    
-    i386SetSegment(gdt + SEL_UTSS /*current->tid */,    /* XXX - YUCK */
-                   (uint32) current->tss, 104,
-                   i386rPRESENT | i386rDPL3 | i386rTSS,
-                   0);
-    task_call(current);
-    
-        /* clear the NT bit */
-    asm("pushf ; pop %%eax ; andl $0xBFFF, %%eax ; push %%eax ;; popf":::"ax");
+	current->scount++;
+	ktss->esp0 = current->esp0;    
+	if(*savestack != current->esp){
+		_context_switch(savestack, current->esp, current->cr3);
+	}
 }
 
 void swtch(void)
 {
-    int x,old;    
-
-#ifdef __SMP__
-		if (smp_my_cpu ())
-			return;
-#endif
-
-    current = queue_removeHeadT(run_queue, &x, task_t*);
-    
-        /*kprintf("swtch(): %d -> ",current->rid);*/
-    
-    old = current->rsrc.id;
-    
-    if((current->flags == tRUNNING) || (current->flags == tREADY)) {
-        current->flags = tREADY;
-        if(current != idle_task) queue_addTail(run_queue, current, 0);        
+	/* current == running thread */
+	uint32 *savestack = &(current->esp);
+	
+	/* fast path for the case of only one running thread */
+	if(!run_queue->queue.count && (current->flags == tRUNNING)) return;
+	
+    if(current->flags == tRUNNING) {
+        if(current != idle_task) rsrc_enqueue(run_queue, current);
     }
 
-    current = queue_peekHead(run_queue);
-
+	/* get the next candidate */
+	current = rsrc_dequeue(run_queue);
+	
     if(!current) {
         if(live_tasks){
             current = idle_task;
-            queue_addTail(run_queue, current, 0);
         } else {
             kprintf("");
             kprintf("No runnable tasks.  Exiting.");
@@ -266,62 +218,55 @@ void swtch(void)
         }
     }
     
-/*    kprintf("%d\n",current->rid);*/
-    
-    current->flags = tRUNNING;
-    
-    i386SetSegment(gdt + SEL_UTSS /* current->tid */,    /* XXX - YUCK */
-        (uint32) current->tss, 104, i386rPRESENT | ((current==idle_task) ?
-        i386rDPL0 : i386rDPL3) | i386rTSS, 0);
-    
-/*    kprintf("swtch() A %X -> %X\n",old,current->rid);*/
-    if(old != current->rsrc.id){
-        task_call(current);
-            /* clear the NT bit */
-        asm("pushf ; pop %%eax ; andl $0xBFFF, %%eax ; push %%eax ;; popf"
-            :::"ax");
-    }
-/*    kprintf("swtch() B -> %X\n",current->rid);    */
+	if(current->flags == tDEAD) panic("The dead have returned!");
+	TCHKMAGIC(current);
+	
+    current->flags = tRUNNING;    
+    current->scount++;
+    ktss->esp0 = current->esp0;
+    if(*savestack != current->esp){
+        _context_switch(savestack, current->esp, current->cr3);
+    }    
 }
 
-task_t *new_thread(aspace_t *a, uint32 ip, int kernelspace)
+task_t *new_thread(team_t *team, uint32 ip, int kernelspace)
 {
     task_t *t;
+    int stack;
+    void *addr;
     int i;
 
+	/* xxx this should be cleaner -- have a flag to area_create perhaps */
     for(i=1023;i>0;i--){
-        if(!a->ptab[i]) break;
+        if(!team->aspace->ptab[i]) break;
     }
-    if(!i) {
-            /* XXX kprintf("\nTask died in birth...\n"); */
-    }
-    aspace_map(a, getpages(1), i, 1, 7);  /* map in a 4k stack */
-    t = task_create(a, ip, i*4096+4092, kernelspace);         
-	rsrc_bind(&t->rsrc, RSRC_TASK, kernel);
+    stack = area_create(team->aspace, 4096, i*4096, &addr, 0);
+    if(!stack) panic("cannot create a stack area. eek");
+
+    t = task_create(team, ip, i*4096+4092, kernelspace);
+    t->ustack = (void *) (i << 12);	
+	t->stack_area = rsrc_find(RSRC_AREA,stack);
+    rsrc_bind(&t->rsrc, RSRC_TASK, team);
     t->flags = tREADY;
     if(!kernelspace) {
-        queue_addTail(run_queue, t, 0);
+		rsrc_enqueue(run_queue, t);
         live_tasks++;
     }
-    
+
     return t;
 }
 
 int brk(uint32 addr)
 {
-    int i;
-    aspace_t *a = current->addr;
-
-    addr /= 4096;
+    aspace_t *a = current->rsrc.owner->aspace;
+    area_t *area = rsrc_find_area(current->rsrc.owner->heap_id);
     
-    if(addr > 512) return -1;
-    for(i=0;i<=addr;i++){
-        if(!(a->ptab[i])){
-            aspace_map(a, getpages(1), i, 1, 7);            
-        }
+    if(area){
+//		kprintf("brk addr %x thid %d",addr,current->rsrc.id);
+        return area_resize(a,current->rsrc.owner->heap_id,
+							0x1000 + ((addr - area->virt_addr) & 0xFFFFF000));
     }
-
-    return 0; /* XXX */
+    return ERR_MEMORY;
 }
 
 /*
@@ -330,84 +275,113 @@ int brk(uint32 addr)
   2 = kernel
 */
 
-void go_kernel(void)
+
+void go_kernel(void) 
 {
     task_t *t;
-    int i,n;    
-    aspace_t *a;
-    
-    port_t *uberport;    
-    uberport = rsrc_find_port(uberportnum = port_create(0));    
+    int i,len;
+    void *ptr,*phys;
+    port_t *uberport;
+	area_t *uberarea;
+	team_t *team;
 
+	for (i = 0, len = 1; (bdir->bd_entry[i].be_type != BE_TYPE_NONE); i++){
+		len += bdir->bd_entry[i].be_size;
+	}
+	len *= 0x1000;
+
+    uberport = rsrc_find_port(uberportnum = port_create(0,"uberport"));
+	uberarea = rsrc_find_area(uberareanum = area_create_uber(len,
+		(void *) 0x100000));
     kprintf("uberport allocated with rid = %d",uberportnum);
+    kprintf("uberarea allocated with rid = %d",uberareanum);
+
+	kernel_team = team_create();
+	rsrc_set_name(&kernel_team->rsrc, "kernel team");
+	
+	run_queue = rsrc_find_queue(queue_create("run queue",kernel_team));
+	reaper_queue = rsrc_find_queue(queue_create("reaper queue",kernel_team));
+	timer_queue = rsrc_find_queue(queue_create("timer queue",kernel_team));
+	rsrc_set_owner(&uberarea->rsrc,kernel_team);
+	rsrc_set_owner(&uberport->rsrc,kernel_team);
 	
     for(i=3;bdir->bd_entry[i].be_type;i++){
-        a = aspace_create();        
-        aspace_map(a, bdir->bd_entry[i].be_offset+0x100, 0,
-                   bdir->bd_entry[i].be_size, 7);
-        aspace_map(a, getpages(2), bdir->bd_entry[i].be_size, 2, 7);
+        if(bdir->bd_entry[i].be_type != BE_TYPE_CODE) continue;
         
-		aspace_map(a, 0xB0, 0xB0, 2, 7);            /* map in video ram */ 
-		aspace_map(a, 0xB8, 0xB8, 2, 7);            /* map in video ram */ 
-        aspace_map(a, 0xA0, 0xA0, 16, 7);           /* EXTREME */
-        
-        t = new_thread(a, bdir->bd_entry[i].be_code_ventr, 0);
-		/* make the thread own it's addressspace */
-		rsrc_set_owner(&a->rsrc, t);
-        if(i == 3) {
-			rsrc_set_owner(&uberport->rsrc, t);
-		}
-		
-        for(n=0;(t->name[n] = bdir->bd_entry[i].be_name[n]);n++);
+		team = team_create();
+        t = new_thread(team, 0x1074 /*bdir->bd_entry[i].be_code_ventr*/, 0);
+        current = t;
 
+        phys = (void *) (bdir->bd_entry[i].be_offset*0x1000 + 0x100000);
+        team->text_area = area_create(team->aspace,bdir->bd_entry[i].be_size*0x1000,
+            0x1000, &phys, AREA_PHYSMAP);
+        team->heap_id = area_create(team->aspace,0x2000,0x1000 + bdir->bd_entry[i].be_size*
+            0x1000, &ptr, 0);
+
+        /* make the thread own it's address space */
+        /* rsrc_set_owner(&a->rsrc, t); */
+
+        if (!strcmp (bdir->bd_entry[i].be_name, "namer")) {
+            rsrc_set_owner(&uberport->rsrc, team);
+        }
+        
+		rsrc_set_name(&t->rsrc,bdir->bd_entry[i].be_name);
+		rsrc_set_name(&team->rsrc,bdir->bd_entry[i].be_name);
+	
         kprintf("task %X @ 0x%x, size = 0x%x (%s)",t->rsrc.id,
                 bdir->bd_entry[i].be_offset*4096+0x100000,
                 bdir->bd_entry[i].be_size*4096,
-                t->name);
-
-        if(!strcmp(bdir->bd_entry[i].be_name,"ne2000")){
-            unsigned char *x =
-                (unsigned char *) (bdir->bd_entry[i].be_offset*4096+0x100020);
-            x[0] = 'i';
-            x[1] = 'p';
-            x[2] = IP[0];
-            x[3] = IP[1];
-            x[4] = IP[2];
-            x[5] = IP[3];            
-        }
+                t->rsrc.name);
     }
 
-    kprintf("creating idle task...");    
-    a = aspace_create();	
-    idle_task = new_thread(a, (int) idler, 1);
-    rsrc_set_owner(&a->rsrc, idle_task);
-	strcpy(idle_task->name,"idler");
-	strcpy(kernel->name,"openblt kernel");
+    kprintf("creating idler...");
+    idle_task = new_thread(kernel_team, (int) idler, 1);
+	rsrc_set_name((resource_t*)idle_task,"idler");
+
+    kprintf("creating grim reaper...");
+    current = new_thread(kernel_team, (int) reaper, 1);
+	rsrc_set_name((resource_t*)current,"grim reaper");
+	reaper_sem = sem_create(0,"death toll");
+	rsrc_enqueue(run_queue, current);
+	live_tasks++;
+
+	kprintf("creating pager...");
+	current = pager_task = new_thread(kernel_team, (int) pager, 1);
+	rsrc_set_name((resource_t*)current,"pager");
+	pager_port_no = port_create(0,"pager port");
+	pager_sem_no = sem_create(0, "pager sem");
+	rsrc_enqueue(run_queue, current);
+	live_tasks++;
+
+	rsrc_set_name((resource_t*)kernel,"kernel");
 
 #ifdef __SMP__
     smp_init ();
 #endif
 
-    k_debugger();
+//    DEBUGGER();
     kprintf("starting scheduler...");    
 
 #ifdef __SMP__
-		if (smp_configured)
-			{
-				smp_final_setup ();
-				kprintf ("smp: signaling other processors");
-				smp_begin ();
-			}
+    if (smp_configured)
+    {
+        smp_final_setup ();
+        kprintf ("smp: signaling other processors");
+        smp_begin ();
+    }
 #endif
 
-		/*
-		 * when the new vm stuffas are done, we can at this point discard any
-		 * complete pages in the .text.init and .data.init sections of the kernel
-		 * by zeroing them and adding them to the free physical page pool.
-		 */
-	
+    /*
+     * when the new vm stuffas are done, we can at this point discard any
+     * complete pages in the .text.init and .data.init sections of the kernel
+     * by zeroing them and adding them to the free physical page pool.
+     */
+        
+    current = kernel;
+    current->flags = tDEAD;
+	current->waiting_on = NULL;
     swtch();
-
+    
     kprintf("panic: returned from scheduler?");
     asm("hlt");
 }
@@ -420,39 +394,54 @@ struct _kinfo
     unsigned char *params;
 } *kinfo = (struct _kinfo *) 0x80000000;
 
+const static char *copyright1 =
+	"OpenBLT Release I (built "__DATE__ ", " __TIME__ ")";
+const static char *copyright2 =
+    "    Copyright (c) 1998-2000 The OpenBLT Dev. Team.  All rights reserved.";
+ 
 void kmain(void)
 {
-    int n;
-    memsize = (kinfo->memsize) / 4096;
+    int n,len;
+    memsize = ((kinfo->memsize) / 4096) & ~0xff;
     entry_ebp = kinfo->entry_ebp;
     bdir = kinfo->bd;
+	
+	for (n = 0, len = 1; (bdir->bd_entry[n].be_type != BE_TYPE_NONE); n++)
+		len += bdir->bd_entry[n].be_size;
 
     init_timer();
-    init_kspace();
+    init_kspace(256 + len + 16); /* bottom of kernel memory */
     
     kprintf_init();
+#ifdef SERIAL
+	dprintf_init();
+#endif
 
-    kprintf("OpenBLT Release I (built %s, %s)", __DATE__, __TIME__);
-    kprintf("    Copyright (c) 1998 The OpenBLT Dev Team.  All rights reserved.");
     kprintf("");
+	kprintf (copyright1);
+	kprintf (copyright2);
+    kprintf("");
+#ifdef DPRINTF
+	dprintf ("");
+	dprintf (copyright1);
+	dprintf (copyright2);
+	dprintf ("");
+	kprintf ("serial port is in dprintf mode");
+	dprintf ("serial port is in dprintf mode");
+	dprintf ("");
+#endif
+
     kprintf("system memory 0x%x",memsize*4096);
-
-    if(kinfo->params[0] == 'i' && kinfo->params[1] == 'p' &&
-       kinfo->params[2] == '=') {
-        kprintf("ip = %d.%d.%d.%d",
-                kinfo->params[3],kinfo->params[4],
-                kinfo->params[5],kinfo->params[6]
-                );
-        IP[0] = kinfo->params[3];
-        IP[1] = kinfo->params[4];
-        IP[2] = kinfo->params[5];
-        IP[3] = kinfo->params[6];        
-    }
-
+    
     n = ((uint32) toppage) + 4080;
-    
     asm("mov %0, %%esp"::"r" (n) );
-    
+	
+	n = SEL_UDATA | 3;
+	asm("pushl %0; popl %%ds"::"r" (n));
+	asm("pushl %0; popl %%es"::"r" (n));
+	asm("pushl %0; popl %%fs"::"r" (n));
+	asm("pushl %0; popl %%gs"::"r" (n));
+	
     kprintf("kernel space initialized");    
     go_kernel();
 }

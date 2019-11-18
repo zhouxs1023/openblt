@@ -1,4 +1,4 @@
-/* $Id: //depot/blt/kernel/smp.c#3 $
+/* $Id: //depot/blt/kernel/smp.c#6 $
 **
 ** Copyright 1998 Sidney Cammeresi
 ** All rights reserved.
@@ -42,16 +42,16 @@
 #endif
 
 const char *cpu_family[] __initdata__ = { "", "", "", "", "Intel 486",
-	"Intel Pentium", "Intel Pentium Pro, I think", "Intel Pentium II, I think" };
+	"Intel Pentium", "Intel Pentium Pro", "Intel Pentium II" };
 const unsigned int temp_gdt[] = {0x00000000, 0x00000000,  /* null descriptor */
                                  0x0000ffff, 0x00cf9a00,  /* kernel text */
                                  0x0000ffff, 0x00cf9200 };/* kernel data */
 
 char mp_num_def_config, smp_num_cpus = 1, smp_num_running_cpus;
-volatile char smp_cpus_ready[MAX_CPUS], smp_configured = 0, smp_begun = 0;
+volatile char smp_cpus_ready[BLT_MAX_CPUS], smp_configured = 0, smp_begun = 0;
 unsigned int cpuid_max_level, cpuid_eax, cpuid_edx, apic_addr,
-	cpu_apic_id[MAX_CPUS], cpu_os_id[MAX_CPUS], cpu_apic_version[MAX_CPUS],
-	*apic, *apic_virt, *ioapic;
+	cpu_apic_id[BLT_MAX_CPUS], cpu_os_id[BLT_MAX_CPUS],
+	cpu_apic_version[BLT_MAX_CPUS], *apic, *apic_virt, *ioapic;
 
 mp_flt_ptr *mp_config;
 
@@ -115,11 +115,11 @@ void __init__ mp_probe (int base, int limit)
 
 	for (ptr = (unsigned int *) base; (unsigned int) ptr < limit; ptr++)
 		if (*ptr == MP_FLT_SIGNATURE)
-			{
-				SMP_PRINTF ("smp: found floating pointer structure at %x", ptr);
-				mp_config = (mp_flt_ptr *) ptr;
-				return;
-			}
+		{
+			SMP_PRINTF ("smp: found floating pointer structure at %x", ptr);
+			mp_config = (mp_flt_ptr *) ptr;
+			return;
+		}
 }
 
 int __init__ mp_verify_data (void)
@@ -141,12 +141,12 @@ int __init__ mp_verify_data (void)
 
 	/* compute mp configuration table checksum if we have one*/
 	if ((ptr = (unsigned char *) mp_config->mpc) != NULL)
-		{
-			for (i = total = 0; i < sizeof (mp_config_table); i++)
-				total += ptr[i];
-			if (total)
-				return 0;
-		}
+	{
+		for (i = total = 0; i < sizeof (mp_config_table); i++)
+			total += ptr[i];
+		if (total)
+			return 0;
+	}
 	else
 		kprintf ("smp: no configuration table\n");
 
@@ -169,47 +169,46 @@ void __init__ mp_do_config (void)
 
 	/* print out our new found configuration. */
 	ptr = (char *) &(mp_config->mpc->oem[0]);
-	kprintf ("smp: oem id: %c%c%c%c%c%c%c%c product id: %c%c%c%c%c%c%c%c%c%c%c%c",
-		ptr[0], ptr[1], ptr[2], ptr[3], ptr[4], ptr[5], ptr[6], ptr[7], ptr[8],
-		ptr[9], ptr[10], ptr[11], ptr[12], ptr[13], ptr[14], ptr[15], ptr[16],
-		ptr[17], ptr[18], ptr[19], ptr[20]);
+	kprintf ("smp: oem id: %c%c%c%c%c%c%c%c product id: "
+		"%c%c%c%c%c%c%c%c%c%c%c%c", ptr[0], ptr[1], ptr[2], ptr[3], ptr[4],
+		ptr[5], ptr[6], ptr[7], ptr[8], ptr[9], ptr[10], ptr[11], ptr[12],
+		ptr[13], ptr[14], ptr[15], ptr[16], ptr[17], ptr[18], ptr[19],
+		ptr[20]);
 	SMP_PRINTF ("smp: base table has %d entries, extended section %d bytes",
 		mp_config->mpc->num_entries, mp_config->mpc->ext_len);
 	apic = (unsigned int *) mp_config->mpc->apic;
 
 	ptr = (char *) ((unsigned int) mp_config->mpc + sizeof (mp_config_table));
 	for (i = 0; i < mp_config->mpc->num_entries; i++)
+		switch (*ptr)
 		{
-			switch (*ptr)
-				{
-					case MP_EXT_PE:
-						pe = (mp_ext_pe *) ptr;
-						cpu_apic_id[smp_num_cpus] = pe->apic_id;
-						cpu_os_id[pe->apic_id] = smp_num_cpus;
-						cpu_apic_version [smp_num_cpus] = pe->apic_version;
-						kprintf ("smp: cpu#%d: %s, apic id %d, version %d%s",
-							smp_num_cpus++,
-							cpu_family[(pe->signature & 0xf00) >> 8], pe->apic_id,
-							pe->apic_version, (pe->cpu_flags & 0x2) ? ", BSP" : "");
-						ptr += 20;
-						break;
-					case MP_EXT_BUS:
-						ptr += 8;
-						break;
-					case MP_EXT_IO_APIC:
-						io = (mp_ext_ioapic *) ptr;
-						ioapic = io->addr;
-						SMP_PRINTF ("smp: found io apic with apic id %d, version %d",
-							io->ioapic_id, io->ioapic_version);
-						ptr += 8;
-						break;
-					case MP_EXT_IO_INT:
-						ptr += 8;
-						break;
-					case MP_EXT_LOCAL_INT:
-						ptr += 8;
-						break;
-				}
+			case MP_EXT_PE:
+				pe = (mp_ext_pe *) ptr;
+				cpu_apic_id[smp_num_cpus] = pe->apic_id;
+				cpu_os_id[pe->apic_id] = smp_num_cpus;
+				cpu_apic_version [smp_num_cpus] = pe->apic_version;
+				kprintf ("smp: cpu#%d: %s, apic id %d, version %d%s",
+					smp_num_cpus++, cpu_family[(pe->signature & 0xf00) >> 8],
+					pe->apic_id, pe->apic_version, (pe->cpu_flags & 0x2) ?
+					", BSP" : "");
+				ptr += 20;
+				break;
+			case MP_EXT_BUS:
+				ptr += 8;
+				break;
+			case MP_EXT_IO_APIC:
+				io = (mp_ext_ioapic *) ptr;
+				ioapic = io->addr;
+				SMP_PRINTF ("smp: found io apic with apic id %d, version %d",
+					io->ioapic_id, io->ioapic_version);
+				ptr += 8;
+				break;
+			case MP_EXT_IO_INT:
+				ptr += 8;
+				break;
+			case MP_EXT_LOCAL_INT:
+				ptr += 8;
+				break;
 		}
 
 	kprintf ("smp: apic @ 0x%x, i/o apic @ 0x%x, total %d processors detected",
@@ -266,46 +265,31 @@ void __init__ smp_init (void)
 		"imcr and pic compatibility mode." : "virtual wire compatibility mode.");
 
 	if (!mp_config->mpc)
-		{
-			/* this system conforms to one of the default configurations */
-			mp_num_def_config = mp_config->mp_feature_1;
-			kprintf ("smp: standard configuration %d", mp_num_def_config);
-			smp_num_cpus = 2;
-			cpu_apic_id[0] = 0;
-			cpu_apic_id[1] = 1;
-			apic = (unsigned int *) 0xfee00000;
-			ioapic = (unsigned int *) 0xfec00000;
-
-			kprintf ("smp: WARNING: standard configuration code is untested");
-		}
+	{
+		/* this system conforms to one of the default configurations */
+		mp_num_def_config = mp_config->mp_feature_1;
+		kprintf ("smp: standard configuration %d", mp_num_def_config);
+		smp_num_cpus = 2;
+		cpu_apic_id[0] = 0;
+		cpu_apic_id[1] = 1;
+		apic = (unsigned int *) 0xfee00000;
+		ioapic = (unsigned int *) 0xfec00000;
+		kprintf ("smp: WARNING: standard configuration code is untested");
 	else
-		{
-			/*
-			 * we don't have a default configuration, so now we have to locate all
-			 * of our hardware.  boy, do we have a lot of work to do.
-			 */
-			SMP_PRINTF ("smp: not a standard configuration");
-			mp_num_def_config = 0;
-			mp_do_config ();
-		}
+	{
+		/*
+		 * we don't have a default configuration, so now we have to locate all
+		 * of our hardware.  boy, do we have a lot of work to do.
+		 */
+		SMP_PRINTF ("smp: not a standard configuration");
+		mp_num_def_config = 0;
+		mp_do_config ();
+	}
 	smp_configured = 1;
 
 	/* set up the apic */
-#if 1
 	aspace_maphi (flat, 0xfee00, 0x3fc, 1, 0x13);
 	apic_virt = (unsigned int *) 0x803fc000;
-#else
-	table = (unsigned int *) (getpages (1) << 12);
-	dir = (unsigned int *) 0x803fd000;
-	dir[(unsigned int) apic >> 22] = (unsigned int) table | 0x13;
-	page = (unsigned int *) (getpages (1) << 12);
-	aspace_maphi (flat, (unsigned int) table >> 12, 0x3fc, 1, 3);
-	aspace_maphi (flat, (unsigned int) page >> 12, 0x3fb, 1, 3);
-	table = (unsigned int *) 0x803fc000;
-	j = ((unsigned int) apic & 0x003ff000) >> 12;
-	table[j] = (unsigned int) apic | 0x13;
-	apic_virt = apic;
-#endif
 	asm ("mov %0, %%cr3" : : "r" (_cr3));
 
 	config = apic_read ((unsigned int *) APIC_SIVR) & APIC_FOCUS | APIC_ENABLE |
@@ -340,94 +324,95 @@ void __init__ smp_init (void)
 	 * would be, ahem, bad.
 	 */
 	for (i = 1; i < smp_num_cpus; i++)
+	{
+		kprintf ("smp: booting cpu#%d with stack 0x%x", i, i * 0x1000);
+
+		/* map stacks and copy bootstrap code onto them */
+		aspace_map (flat, i, i, 1, 3);
+		ptr = (unsigned char *) (0x1000 * i);
+		for (j = 0; j < ((unsigned int) &trampoline_end - (unsigned int)
+				&trampoline + 1); j++)
+			ptr[j] = ((unsigned char *) &trampoline)[j];
+
+		/*
+		 * modify the bootstrap code, specifically, the third highest order
+		 * byte of the ljmp.  we need to do this if we have more than two
+		 * processors, i.e. more than one ap.
+		 */
+		ptr = (char *) flush;
+		*(ptr - 5) = i << 4;
+
+		/* write the location of the stack into a fixed spot in memory */
+		*common = 0x1000 * i;
+
+		/* set shutdown code and warm reset vector */
+		ptr = (unsigned char *) 0xf;
+		*ptr = 0xa;
+		ptr = (unsigned char *) 0x467;
+		*ptr = 0x1000 * i;
+		ptr = (unsigned char *) 0x469;
+		*ptr = 0;
+
+		/* reset cpu ready bit */
+		smp_cpus_ready[i] = 0;
+
+		/* clear apic errors */
+		if (cpu_apic_version[i] & 0xf0)
 		{
-			kprintf ("smp: booting cpu#%d with stack 0x%x", i, i * 0x1000);
+			apic_write (APIC_ESR, 0);
+			apic_read (APIC_ESR);
+		}
 
-			/* map stacks and copy bootstrap code onto them */
-			aspace_map (flat, i, i, 1, 3);
-			ptr = (unsigned char *) (0x1000 * i);
-			for (j = 0; j < ((unsigned int) &trampoline_end - (unsigned int)
-					&trampoline + 1); j++)
-				ptr[j] = ((unsigned char *) &trampoline)[j];
+		/* send (aka assert) INIT IPI */
+		SMP_PRINTF ("smp: asserting INIT");
+		config = apic_read (APIC_ICR2) & 0xf0ffffff | (cpu_apic_id[i] << 24);
+		apic_write (APIC_ICR2, config); /* set target pe */
+		config = apic_read (APIC_ICR1) & 0xfff0f800 | APIC_DM_INIT | 
+			APIC_LEVEL_TRIG | APIC_ASSERT;
+		apic_write (APIC_ICR1, config);
 
-			/*
-			 * modify the bootstrap code, specifically, the third highest order
-			 * byte of the ljmp.  we need to do this if we have more than two
-			 * processors, i.e. more than one ap.
-			 */
-			ptr = (char *) flush;
-			*(ptr - 5) = i << 4;
+		/* deassert INIT */
+		SMP_PRINTF ("smp: deasserting INIT");
+		config = apic_read (APIC_ICR2) & 0xffffff | (cpu_apic_id[i] << 24);
+		apic_write (APIC_ICR2, config);
+		config = apic_read (APIC_ICR1) & ~0xcdfff | APIC_LEVEL_TRIG |
+			APIC_DM_INIT;
 
-			/* write the location of the stack into a fixed spot in memory */
-			*common = 0x1000 * i;
+		/* wait 10ms */
+		u_sleep (10000);
 
-			/* set shutdown code and warm reset vector */
-			ptr = (unsigned char *) 0xf;
-			*ptr = 0xa;
-			ptr = (unsigned char *) 0x467;
-			*ptr = 0x1000 * i;
-			ptr = (unsigned char *) 0x469;
-			*ptr = 0;
+		/* is this a local apic or an 82489dx ? */
+		num_startups = (cpu_apic_version[i] & 0xf0) ? 2 : 0;
+		for (j = 0; j < num_startups; j++)
+		{
+			/* it's a local apic, so send STARTUP IPIs */
+			SMP_PRINTF ("smp: sending STARTUP");
+			apic_write (APIC_ESR, 0);
 
-			/* reset cpu ready bit */
-			smp_cpus_ready[i] = 0;
+			/* set target pe */
+			config = apic_read (APIC_ICR2) & 0xf0ffffff | (cpu_apic_id[i] <<
+				24);
+			apic_write (APIC_ICR2, config);
 
-			/* clear apic errors */
-			if (cpu_apic_version[i] & 0xf0)
-				{
-					apic_write (APIC_ESR, 0);
-					apic_read (APIC_ESR);
-				}
-
-			/* send (aka assert) INIT IPI */
-			SMP_PRINTF ("smp: asserting INIT");
-			config = apic_read (APIC_ICR2) & 0xf0ffffff | (cpu_apic_id[i] << 24);
-			apic_write (APIC_ICR2, config); /* set target pe */
-			config = apic_read (APIC_ICR1) & 0xfff0f800 | APIC_DM_INIT | 
-				APIC_LEVEL_TRIG | APIC_ASSERT;
+			/* send the IPI */
+			config = apic_read (APIC_ICR1) & 0xfff0f800 | APIC_DM_STARTUP |
+				((0x1000 * i) >> 12);
 			apic_write (APIC_ICR1, config);
 
-			/* deassert INIT */
-			SMP_PRINTF ("smp: deasserting INIT");
-			config = apic_read (APIC_ICR2) & 0xffffff | (cpu_apic_id[i] << 24);
-			apic_write (APIC_ICR2, config);
-			config = apic_read (APIC_ICR1) & ~0xcdfff | APIC_LEVEL_TRIG |
-				APIC_DM_INIT;
-
-			/* wait 10ms */
-			u_sleep (10000);
-
-			/* is this a local apic or an 82489dx ? */
-			num_startups = (cpu_apic_version[i] & 0xf0) ? 2 : 0;
-			for (j = 0; j < num_startups; j++)
-				{
-					/* it's a local apic, so send STARTUP IPIs */
-					SMP_PRINTF ("smp: sending STARTUP");
-					apic_write (APIC_ESR, 0);
-
-					/* set target pe */
-					config = apic_read (APIC_ICR2) & 0xf0ffffff | (cpu_apic_id[i] << 24);
-					apic_write (APIC_ICR2, config);
-
-					/* send the IPI */
-					config = apic_read (APIC_ICR1) & 0xfff0f800 | APIC_DM_STARTUP |
-						((0x1000 * i) >> 12);
-					apic_write (APIC_ICR1, config);
-
-					/* wait */
-					u_sleep (200);
-					while (apic_read (APIC_ICR1) & 0x1000) ;
-				}
-
-			/* wait for processor to boot */
-			SMP_PRINTF ("smp: waiting for cpu#%d to come online", i);
-			apic_set_timer (5000000); /* 5 seconds */
-			while (apic_read_timer ())
-				if (smp_cpus_ready[i])
-					break;
-			if (!smp_cpus_ready[i])
-				kprintf ("smp: initialisation of cpu#%d failed", i);
+			/* wait */
+			u_sleep (200);
+			while (apic_read (APIC_ICR1) & 0x1000) ;
 		}
+
+		/* wait for processor to boot */
+		SMP_PRINTF ("smp: waiting for cpu#%d to come online", i);
+		apic_set_timer (5000000); /* 5 seconds */
+		while (apic_read_timer ())
+			if (smp_cpus_ready[i])
+				break;
+		if (!smp_cpus_ready[i])
+			kprintf ("smp: initialisation of cpu#%d failed", i);
+	}
 
 	/* this processor is already booted */
 	smp_cpus_ready[smp_my_cpu ()] = 1;
@@ -463,8 +448,8 @@ void __init__ smp_final_setup (void)
 {
 	unsigned int config, ticks_per_us;
 
-  ticks_per_us = bus_clock () / 1000000;
-  apic_write (APIC_ICRT, ticks_per_us * 10000); /* 10 ms */
+	ticks_per_us = bus_clock () / 1000000;
+	apic_write (APIC_ICRT, ticks_per_us * 10000); /* 10 ms */
 	config = 0x20030;
 	apic_write (APIC_LVTT, config);
 
@@ -526,7 +511,8 @@ void ipi_dest (int num, int pe)
 	cli ();
 	config = apic_read (APIC_ICR2) & 0xffffff | (pe << 24);
 	apic_write (APIC_ICR2, config);
-	config = apic_read (APIC_ICR1) & 0xfff0f800 | APIC_DEST_FIELD | num | 0x4000;
+	config = apic_read (APIC_ICR1) & 0xfff0f800 | APIC_DEST_FIELD | num |
+		0x4000;
 	apic_write (APIC_ICR1, config);
 	sti ();
 	v (&ipi_lock);

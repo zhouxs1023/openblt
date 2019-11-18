@@ -1,4 +1,4 @@
-/* $Id: //depot/blt/include/string.h#3 $
+/* $Id: //depot/blt/include/string.h#9 $
 **
 ** Copyright 1998 Brian J. Swetland
 ** All rights reserved.
@@ -31,18 +31,34 @@
 
 #include <blt/types.h>
 
-char *strcpy(char *dst, const char *src);
-char *strncpy(char *dst, const char *src, size_t size);
-int strncmp(const char *s1, const char *s2, size_t n);
-int strcmp(const char *s1, const char *s2);
-size_t strlen(const char *str);
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-void *memset(void *s, int c, size_t n);
-int memcmp(const void *dst, const void *src, size_t size);
-void *memcpy(void *dst, const void *src, size_t size);
-void *memmove(void *dest, const void *src, size_t n);
+	char *strcpy(char *dst, const char *src);
+	char *strcat(char *dst, const char *src);
+	char *strncpy(char *dst, const char *src, size_t size);
+	int strncmp(const char *s1, const char *s2, size_t n);
+	int strcmp(const char *s1, const char *s2);
+	size_t strlen(const char *str);
+	char *strchr (const char *cs, int c);
+	size_t strlcpy (char *dst, const char *src, size_t size);
+	size_t strlcat (char *dst, const char *src, size_t size);
+	
+	void *memset(void *s, int c, size_t n);
+	int memcmp(const void *dst, const void *src, size_t size);
+	void *memcpy(void *dst, const void *src, size_t size);
+	void *memmove(void *dest, const void *src, size_t n);
+	
+	int bcmp (const void *s, const void *t, size_t len);
+	void bzero (void *b, size_t len);
+	
+	char *_strerror (int errnum);
+	char *strerror (int errnum);
 
-int bcmp (const void *s, const void *t, size_t len);
-void bzero (void *b, size_t len);
+#ifdef __cplusplus
+}
+#endif
+
 
 #endif

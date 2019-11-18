@@ -1,4 +1,4 @@
-/* $Id: //depot/blt/include/stdio.h#1 $
+/* $Id: //depot/blt/include/stdio.h#7 $
 **
 ** Copyright 1998 Sidney Cammeresi
 ** All rights reserved.
@@ -7,7 +7,7 @@
 ** modification, are permitted provided that the following conditions
 ** are met:
 ** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions, and the following disclaimer.
+**	  notice, this list of conditions, and the following disclaimer.
 ** 2. Redistributions in binary form must reproduce the above copyright
 **    notice, this list of conditions, and the following disclaimer in the
 **    documentation and/or other materials provided with the distribution.
@@ -31,7 +31,34 @@
 
 #include <blt/types.h>
 
-int printf (char *format, ...);
+typedef struct
+{
+	int fd;
+} FILE;
+
+extern FILE *stdin, *stdout, *stderr;
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+	int _console_read (void *cookie, void *buf, size_t count);
+	
+	int _getc (FILE *stream);
+	int getc (FILE *stream);
+	int _getchar (void);
+	int getchar (void);
+	
+	int _printf (const char *format, ...);
+	int printf (const char *format, ...);
+
+	int _snprintf (char *str, size_t size, const char *format, ...);
+	int snprintf (char *str, size_t size, const char *format, ...);
+
+#ifdef __cplusplus
+}
+#endif
+
 
 #endif
 

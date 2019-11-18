@@ -1,4 +1,4 @@
-/* $Id: //depot/blt/boot/boot.c#2 $
+/* $Id: //depot/blt/boot/boot.c#3 $
 **
 ** Copyright 1998 Brian J. Swetland
 ** All rights reserved.
@@ -33,6 +33,7 @@
 
 #include "types.h"
 #include "boot.h"
+#include <multiboot.h>
 
 #ifdef DIAG
 #include "../include/blt/conio.h"
@@ -48,7 +49,23 @@ struct _kinfo
     unsigned char *param;
 } *kinfo = (struct _kinfo *) 0x00102000;
 
+static unsigned int multiboot[] __attribute__ ((__section__ (".text"))) =
+{
+	0x1badb002,
+	0x00010002,
+	(unsigned int) 0 - 0x1badb002 - 0x00010002,
+	(unsigned int) multiboot,
+	0x100000,
+	0x14a000,
+	0x14a000,
+	0x101074
+};
 
+static void enable_paging (void)
+{
+	__asm__ ("movl $0x80000001, %eax ; mov %eax, %cr0");
+}
+	
 void bootstrap(boot_dir *bd, uint32 memsize, uint32 entry_ebp, char *p)
 {
     uint32 *flat;
@@ -98,6 +115,7 @@ void bootstrap(boot_dir *bd, uint32 memsize, uint32 entry_ebp, char *p)
 
     _cr3 = (uint32) flat;
     __asm__ ("mov %0, %%cr3"::"r" (_cr3));
+	enable_paging ();
 
 #ifdef DIAG
     flat = 0x803fd000;
@@ -120,5 +138,19 @@ void bootstrap(boot_dir *bd, uint32 memsize, uint32 entry_ebp, char *p)
 #endif
     
     k_start();
+}
+
+void grub_bootstrap (multiboot_info *minfo)
+{
+	const static unsigned int temp_gdt[] = { 0x00000000, 0x00000000,
+		0x0000ffff, 0x00cf9a00, 0x0000ffff, 0x00cf9200 };
+	unsigned int i[2];
+
+	i[0] = 24 << 16;
+	i[1] = (unsigned int) temp_gdt;
+	asm ("lgdt (%0)" : : "p" (((char *) i) + 2));
+	adjust_seg_regs ();
+	bootstrap ((boot_dir *) 0x100000, (minfo->mem_lower + minfo->mem_upper +
+		384) * 1024, 0, minfo->cmdline);
 }
 

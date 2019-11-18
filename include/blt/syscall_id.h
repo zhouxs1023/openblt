@@ -1,4 +1,4 @@
-/* $Id: //depot/blt/include/blt/syscall_id.h#5 $
+/* $Id: //depot/blt/include/blt/syscall_id.h#11 $
 **
 ** Copyright 1998 Brian J. Swetland
 ** All rights reserved.
@@ -29,32 +29,44 @@
 #define _SYSCALL_ID_H
 
 /* syscall id #'s */
-#define BLT_SYS_os_thread      0
-#define BLT_SYS_os_terminate   1
-#define BLT_SYS_os_console     2
-#define BLT_SYS_os_brk         3
-#define BLT_SYS_os_handle_irq  4
-#define BLT_SYS_os_sleep_irq   5
-#define BLT_SYS_os_debug       6
-#define BLT_SYS_os_sleep       7
-#define BLT_SYS_sem_create     8
-#define BLT_SYS_sem_destroy    9
-#define BLT_SYS_sem_acquire   10
-#define BLT_SYS_sem_release   11
-#define BLT_SYS_port_create   12
-#define BLT_SYS_port_destroy  13
-#define BLT_SYS_port_option   14
-#define BLT_SYS_port_send     15
-#define BLT_SYS_port_recv     16
-#define BLT_SYS_os_identify   17
-#define BLT_SYS_right_create  18
-#define BLT_SYS_right_destroy 19
-#define BLT_SYS_right_revoke  20
-#define BLT_SYS_right_attach  21
-#define BLT_SYS_right_grant   22
-#define BLT_SYS_get_bootfs    23
-#define BLT_SYS_thr_create    24
-#define BLT_SYS_thr_resume    25
-#define BLT_SYS_thr_suspend   26
-#define BLT_SYS_thr_kill      27
+#define BLT_SYS_os_meta          0
+#define BLT_SYS_os_terminate     1
+#define BLT_SYS_os_console       2
+#define BLT_SYS_os_brk           3
+#define BLT_SYS_os_handle_irq    4
+#define BLT_SYS_os_sleep_irq     5
+#define BLT_SYS_os_debug         6
+#define BLT_SYS_os_sleep         7
+
+#define BLT_SYS_sem_create       8
+#define BLT_SYS_sem_destroy      9
+#define BLT_SYS_sem_acquire     10
+#define BLT_SYS_sem_release     11
+
+#define BLT_SYS_port_create     12
+#define BLT_SYS_port_destroy    13
+#define BLT_SYS_port_option     14
+#define BLT_SYS_port_send       15
+#define BLT_SYS_port_recv       16
+
+#define BLT_SYS_os_identify     17
+
+#define BLT_SYS_right_create    18
+#define BLT_SYS_right_destroy   19
+#define BLT_SYS_right_revoke    20
+#define BLT_SYS_right_attach    21
+#define BLT_SYS_right_grant     22
+
+#define BLT_SYS_thr_create      24
+#define BLT_SYS_thr_spawn       25
+#define BLT_SYS_thr_resume      26
+#define BLT_SYS_thr_suspend     27
+#define BLT_SYS_thr_kill        28
+#define BLT_SYS_thr_wait        29
+
+#define BLT_SYS_area_create     30
+#define BLT_SYS_area_clone      31
+#define BLT_SYS_area_destroy    32
+#define BLT_SYS_area_resize     33
+
 #endif

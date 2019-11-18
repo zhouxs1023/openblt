@@ -1,37 +1,15 @@
-/* $Id: //depot/blt/kernel/resource.c#2 $
-**
-** Copyright 1998 Brian J. Swetland
-** All rights reserved.
-**
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions, and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions, and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
-**
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+/* Copyright 1998-1999, Brian J. Swetland. All rights reserved.
+** Distributed under the terms of the OpenBLT License
 */
+
 #include "kernel.h"
 #include "memory.h"
 #include "resource.h"
+#include "team.h"
 
 typedef struct _rtab {
-	resource_t *resource;
-	int next;
+    resource_t *resource;
+    int next;
 } rtab;
 
 static resource_t null_resource;
@@ -40,20 +18,21 @@ static rtab *rmap;
 static uint32 rmax = 0;
 static uint32 rfree = 0;
 
-resnode_t *resource_list = NULL;
-
+list_t resource_list;
 
 void rsrc_init(void *map, int size)
 {
     int i;
 
-	null_resource.id = 0;
-	null_resource.type = RSRC_NONE;
-	null_resource.owner = NULL;
-	null_resource.rights = NULL;
-	    
+	list_init(&resource_list);
+	
+    null_resource.id = 0;
+    null_resource.type = RSRC_NONE;
+    null_resource.owner = NULL;
+	list_init(&null_resource.rights);
+    
     rfree = 1;    
-    rmax = size / sizeof(resource_t);
+    rmax = size / sizeof(rtab);
     rmap = (rtab *) map;
     for(i = 0; i < rmax; i++) {
         rmap[i].resource = &null_resource;
@@ -64,128 +43,141 @@ void rsrc_init(void *map, int size)
 
 void *rsrc_find(int type, int id)
 {    
-    if((id < rmax) && (rmap[id].resource->type == type)) return rmap[id].resource;
-    return NULL;    
+    if((id < rmax) && (rmap[id].resource->type == type)) {
+        return rmap[id].resource;
+    } else {
+        return NULL;    
+    }
 }
 
-void rsrc_set_owner(resource_t *r, task_t *owner) 
+void rsrc_set_owner(resource_t *r, team_t *owner) 
 {
-	resnode_t *rn;
-	
-	if(r->owner){
-		/* unchain it from the owner */
-		for(rn = r->owner->resources; rn; rn=rn->next){
-			if(rn->resource == r){
-				if(rn->prev) {
-					rn->prev->next = rn->next;
-				} else {
-					r->owner->resources = rn->next;
-				}
-				if(rn->next) {
-					rn->next->prev = rn->prev;
-				}
-				kfree16(rn);
-				break;
-			}
-		}		
-	}
-	
-	r->owner = owner;
-
-	if(owner){
-		rn = (resnode_t *) kmalloc16();
-		rn->resource = r;
-		rn->prev = NULL;
-		rn->next = owner->resources;
-		owner->resources = rn;	
-	}
+    if(r->owner) list_remove(&r->owner->resources, r);
+	if(r->owner = owner) list_add_tail(&owner->resources, r);
 }
-
 
 int rsrc_identify(uint32 id) 
 {
-	if((id >= rmax) || (rmap[id].resource->type == RSRC_NONE)) return 0;
-	return rmap[id].resource->owner->rsrc.id; 
+    if((id >= rmax) || (rmap[id].resource->type == RSRC_NONE)) return 0;
+    return rmap[id].resource->owner->rsrc.id; 
 }
 
+int queue_create(const char *name, team_t *team)
+{
+	resource_t *rsrc = (resource_t*) kmalloc(resource_t);
+	rsrc_bind(rsrc,RSRC_QUEUE,team);
+	rsrc_set_name(rsrc,name);
+	return rsrc->id;
+}
 
-void rsrc_bind(resource_t *rsrc, rsrc_type type, task_t *owner)
+void rsrc_bind(resource_t *rsrc, rsrc_type type, team_t *owner)
 {
     uint32 id;
-    resnode_t *rn;
-	
+    
     if(rfree){
         id = rfree;
         rfree = rmap[rfree].next;
     } else {
         panic("resource exhaustion");
     }
-
+    
     rmap[id].resource = rsrc;
-	rsrc->id = id;
-	rsrc->type = type;
-	rsrc->owner = owner;
-	rsrc->rights = NULL;
+    rsrc->id = id;
+    rsrc->type = type;
+    rsrc->owner = owner;
+	rsrc->name[0] = 0;
 	
-	if(owner){
-		rn = (resnode_t *) kmalloc16();
-		rn->resource = rsrc;
-		rn->prev = NULL;
-		rn->next = owner->resources;
-		owner->resources = rn;	
-	}
-	rn = (resnode_t *) kmalloc16();
-	rn->resource = rsrc;
-	rn->prev = NULL;
-	rn->next = resource_list;
-	resource_list = rn;
+	list_init(&rsrc->queue);
+	list_init(&rsrc->rights);
+	
+    if(owner) list_add_tail(&owner->resources, rsrc);
+	
+	list_add_tail(&resource_list, rsrc);
 }
 
 void rsrc_release(resource_t *r)
 {
-	uint32 id = r->id;
-	resnode_t *rn;
+    uint32 id = r->id;
+    task_t *t;
+	
+	/* unchain it from the owner */
+    if(r->owner) list_remove(&r->owner->resources, r);
 	
 	/* unchain it from the global pool */
-	for(rn = resource_list; rn; rn=rn->next){
-		if(rn->resource == r){
-			if(rn->prev) {
-				rn->prev->next = rn->next;
-			} else {
-				resource_list = rn->next;
-			}
-			if(rn->next) {
-				rn->next->prev = rn->prev;
-			}
-			kfree16(rn);
-			break;
-		}
+	list_remove(&resource_list, r);
+    
+	/* wake all blocking objects */
+	while((t = list_detach_head(&r->queue))) {
+		task_wake(t,ERR_RESOURCE);
 	}
 	
-	if(r->owner){
-		/* unchain it from the owner */
-		for(rn = r->owner->resources; rn; rn=rn->next){
-			if(rn->resource == r){
-				if(rn->prev) {
-					rn->prev->next = rn->next;
-				} else {
-					r->owner->resources = rn->next;
-				}
-				if(rn->next) {
-					rn->next->prev = rn->prev;
-				}
-				kfree16(rn);
-				break;
-			}
-		}	
-	}
-	
-	
-	r->type = RSRC_NONE;
-	r->id = 0;
+    r->type = RSRC_NONE;
+    r->id = 0;
 	rmap[id].resource = &null_resource;
 	rmap[id].next = rfree;
-	rfree = id;
+    rfree = id;
 }
 
+void rsrc_set_name(resource_t *r, const char *name)
+{
+	if(name){
+		int i;
+		for(i=0;*name && (i<31);i++){
+			r->name[i] = *name;
+			name++;
+		}
+		r->name[i] = 0;
+	} else {
+		r->name[0] = 0;
+	}
+}
 
+void rsrc_enqueue_ordered(resource_t *rsrc, task_t *task, uint32 wake_time)
+{
+/* XXX fixme*/
+	list_attach_tail(&rsrc->queue, &task->node);
+	task->wait_time = wake_time;
+	task->flags = tWAITING;
+	task->waiting_on = rsrc;	
+}
+
+void rsrc_enqueue(resource_t *rsrc, task_t *task)
+{
+	task->wait_time = 0;
+	task->flags = tWAITING;
+	task->waiting_on = rsrc;
+	list_attach_tail(&rsrc->queue,&task->node);
+}
+
+task_t *rsrc_dequeue(resource_t *rsrc)
+{
+	task_t *task = (task_t *) list_detach_head(&rsrc->queue);
+	if(task){
+		task->waiting_on = NULL;
+		task->flags = tREADY;
+	}
+	return task;
+}
+
+task_t *rsrc_queue_peek(resource_t *rsrc)
+{
+	if(rsrc->queue.next != (node_t*) &rsrc->queue) {
+		return (task_t*) rsrc->queue.next->data;
+	}
+}
+
+const char *rsrc_typename(resource_t *rsrc)
+{
+	switch(rsrc->type){
+	case RSRC_NONE: return "none";
+	case RSRC_TASK: return "task";
+	case RSRC_ASPACE: return "aspace";
+	case RSRC_PORT: return "port";
+	case RSRC_SEM: return "sem";
+	case RSRC_RIGHT: return "right";
+	case RSRC_AREA: return "area";
+	case RSRC_QUEUE: return "queue";
+	case RSRC_TEAM: return "team";
+	default: return "????";
+	}
+}

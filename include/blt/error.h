@@ -1,4 +1,4 @@
-/* $Id: //depot/blt/include/blt/error.h#2 $
+/* $Id: //depot/blt/include/blt/error.h#4 $
 **
 ** Copyright 1998 Brian J. Swetland
 ** All rights reserved.
@@ -38,5 +38,7 @@
 
 #define ERR_SENDPORT    -4
 #define ERR_RECVPORT    -5
+#define ERR_WOULD_BLOCK -6
 
+#define ERR_SEGV        -7
 #endif

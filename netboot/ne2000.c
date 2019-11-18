@@ -1,4 +1,4 @@
-/* $Id: //depot/blt/netboot/ne2000.c#2 $
+/* $Id: //depot/blt/netboot/ne2000.c#3 $
 **
 ** Copyright 1998 Brian J. Swetland
 ** All rights reserved.
@@ -85,21 +85,8 @@ int nic_probe(int addr) {
 // probe, so it's not always a good idea to run it.  If you already have 
 // the information, then you can just use that with nic_init().*/
 int nic_detect(int given) {
-	int found; int f;
-/*	kprintf("NE2000: detecting card...");*/
-	if(given) if((found=nic_probe(given))!=ERRNOTFOUND) {
-/*		kprintf("found at given:0x%x\n",given);*/
-		return found; }
-
-	/* probe for PCI clones here....  or not...*/
-
-	for(f=0;default_ports[f]!='\0';f++) {
-		// perform resource manegment here
-		if((found=nic_probe(default_ports[f]))!=ERRNOTFOUND) {
-/*			kprintf("found at default:0x%x\n",default_ports[f]);*/
-			return found; }
-	}
-/*	kprintf("none found.\n");*/
+	int found;
+	if((found=nic_probe(given))!=ERRNOTFOUND) { return found; }
 	return ERRNOTFOUND;
 }
 
@@ -110,7 +97,6 @@ int nic_detect(int given) {
 // you, otherwise it will just reinitialize it. */
 int nic_init(snic* nic, int addr, unsigned char *prom, unsigned char *manual) {
 	uint f;
-/*	kprintf("NE2000: reseting NIC card...");*/
 	if(!nic->iobase) {
 		nic->iobase=addr;
 		nic_stat_clear(&nic->stat);
@@ -118,14 +104,11 @@ int nic_init(snic* nic, int addr, unsigned char *prom, unsigned char *manual) {
 		nic->current_page=0;
 		nic->notify=NULL;
 		for(f=0;f<MAX_TX;f++) nic->tx_packet[f].len=0;
-/*                kprintf("nic = %x",nic);*/
-                
 		nic->last_tx=NULL;
 		nic->busy=0;
 	} else {
 		if(!nic->iobase || nic->iobase!=addr) return ERR;
-	}
-	
+	}	
 
 	outb(inb(addr + NE_RESET), addr + NE_RESET);	/* reset the NE2000*/
 	while(!(inb_p(addr+INTERRUPTSTATUS) & ISR_RST)) {
@@ -171,9 +154,6 @@ int nic_init(snic* nic, int addr, unsigned char *prom, unsigned char *manual) {
 	outb_p(NIC_DMA_DISABLE | NIC_PAGE1 | NIC_STOP, addr);  /* switch to page 1 */
 	if(manual) for(f=0;f<6;f++) outb_p(manual[f], addr + PHYSICAL + f);
 	else for(f=0;f<LEN_ADDR;f++) outb_p(prom[f], addr + PHYSICAL + f);
-/*	else for(f=0;f<LEN_ADDR;f++) {
-//		outb_p(prom[f],addr+PHYSICAL+f);
-//		kprintf("%X",prom[f]); } kprintf("\n"); */
 
 	/* setup multicast filter to accept all packets*/
 	for(f=0;f<8;f++) outb_p(0xFF, addr + MULTICAST + f);
@@ -204,17 +184,6 @@ void nic_start(snic *nic, int promiscuous) {
 		outb(RCR_PRO | RCR_AM, iobase + RECEIVECONFIGURATION);
 	else
 		outb(RCR_DEFAULT, iobase + RECEIVECONFIGURATION);
-
-	/* The following is debugging code! */
-/*	kprintf("NE2000: Trying to fire off an IRQ.\n");
-	outb_p(0x50,iobase+INTERRUPTMASK);
-	outb_p(0x00,iobase+REMOTEBYTECOUNT0);
-	outb_p(0x00,iobase+REMOTEBYTECOUNT1); */
-/*	outb_p(NIC_REM_READ | NIC_START,iobase);   /* this should fire off */
-/*	outb_p(IMR_DEFAULT,iobase+INTERRUPTMASK);  /* an interrupt... */
-/*	outb_p(NIC_DMA_DISABLE | NIC_PAGE0 | NIC_START, iobase);
-	outb_p(0xff,iobase+INTERRUPTSTATUS); */
-	/* End debugging code */
 }
 
 /* stops the NIC */
@@ -236,7 +205,7 @@ void nic_isr(snic *nic) {
 		else if(isr & (ISR_PRX | ISR_RXE))	nic_rx(nic);
 		if(isr & ISR_PTX)			nic_tx(nic);
 		else if(isr & ISR_TXE)			nic_tx_err(nic);
-		if(isr & ISR_CNT)			nic_counters(nic);
+//		if(isr & ISR_CNT)			nic_counters(nic);
 		if(isr & ISR_RDC) outb_p(ISR_RDC, nic->iobase+ INTERRUPTSTATUS);
 		outb_p(NIC_DMA_DISABLE | NIC_PAGE0 | NIC_START, nic->iobase);
 	}
@@ -339,9 +308,6 @@ int nic_send_packet(snic *nic, packet_buffer* buffer) {
 			return NOERR;
 		}
 	}
-if(f==MAX_TX) 
-{
-}
 
 	outb_p(IMR_DEFAULT, iobase + INTERRUPTMASK);	/* unmask */
 	nic->busy=0;	/* V() */
@@ -479,12 +445,6 @@ void nic_rx(snic *nic) {
 		if(frame>=nic->pstop) frame=nic->pstart+TXPAGES;
 							/* circual buffer */
 
-/*		if(frame != nic->current_page) {
-			kprintf("NE2000: ERROR: mismatched read page pointers!\n");
-			kprintf("NE2000: NIC-Boundary:%x  dev-current_page:%x\n",
-				frame, nic->current_page); }
-                                */
-//		kprintf("Boundary-%x  Current-%x\n",frame-1,rx_page);
 		if(frame==rx_page) break;	/* all frames read */
 
 		rx_offset=frame << 8;  /* current ptr in bytes(not pages) */
@@ -512,14 +472,6 @@ void nic_rx(snic *nic) {
 			nic->stat.errors.rx_size++;
 		} else if((header.status & 0x0f) == RSR_PRX) {
 			/* We have a good packet, so let's recieve it! */
-
-/*OBSOLETE		packet_buffer newpacket; */
-/*			if(!(newpacket.ptr=(unsigned char*)kalloc(len))) {
-				kprintf("NE2000: ERROR: out of memory!\n");
-				nic->stat.errors.rx_dropped++;
-				break;
-			} */
-/*			newpacket.len=len;	newpacket.page=0; */
 
 			packet_buffer *newpacket=alloc_buffer(len);
 			if(!newpacket) {
@@ -556,14 +508,6 @@ void nic_rx(snic *nic) {
 		outb_p(next_pkt-1, iobase + BOUNDARY);
 	}
 	outb_p(ISR_PRX | ISR_RXE, iobase + INTERRUPTSTATUS);	/* ack int */
-}
-
-void nic_counters(snic *nic) {
-	nic->stat.errors.frame_alignment+=inb_p(nic->iobase+FAE_TALLY);
-	nic->stat.errors.crc+=inb_p(nic->iobase+CRC_TALLY);
-	nic->stat.errors.missed_packets+=inb_p(nic->iobase+MISS_PKT_TALLY);
-	/* reading the counters on the DC8390 clears them. */
-	outb_p(ISR_CNT, nic->iobase + INTERRUPTSTATUS); /* ackkowledge int */
 }
 
 /* You should be able to make this procedure a wrapper of nic_block_input */

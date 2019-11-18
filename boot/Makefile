@@ -1,16 +1,12 @@
-# $Id: //depot/blt/boot/Makefile#3 $
+BLTHOME := ../
 
-include ../make.conf
+include $(BLTHOME)make.conf
 
-CFLAGS = $(CF) -I../kernel -I../include
+CFLAGS		+= -I../kernel
+BINARY		:= boot.bin
+OBJS		:= bootstub.o boot.o
+LIBS		:= -lconsole
+ENTRY		:= $(ENTRY_BOOTSTRAP)
+CRT0		:= 
 
-all: boot.bin
-
-boot.bin: bootstub.o boot.o 
-	$(LD) -dN -Ttext $(ENTRY_BOOTSTRAP) -o boot.bin bootstub.o boot.o ../lib/obj/libconsole.a
-	$(NM) -nC boot.bin > boot.map
-	$(ST) boot.bin
-
-clean:
-	rm -f *.o *~ os.* core *.core *.s *.map *.bin
-
+include $(BLTHOME)make.actions

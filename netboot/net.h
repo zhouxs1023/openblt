@@ -1,4 +1,4 @@
-/* $Id: //depot/blt/netboot/net.h#2 $
+/* $Id: //depot/blt/netboot/net.h#3 $
 **
 ** Copyright 1998 Brian J. Swetland
 ** All rights reserved.
@@ -27,9 +27,11 @@
 */
 #pragma pack(2)
 
+/*
 typedef unsigned char uint8;
 typedef unsigned short uint16;
 typedef unsigned int uint32;
+*/
 
 typedef struct 
 {

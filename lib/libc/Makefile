@@ -1,24 +1,19 @@
-# $Id: //depot/blt/lib/Makefile#5 $
+BLTHOME := ../../
+include $(BLTHOME)make.conf
 
-include ../../make.conf
+MINIMAL = string.o snprintf.o strcmp.o strcpy.o strlen.o strlcat.o strlcpy.o
+EXTRA = malloc.o memory.o errno.o qsort.o stdlib.o ctype.o \
+	qsem.o atomic.o syscalls.o cppglue.o
 
-CFLAGS = $(CF) -I../../include
-
-all: libc.a libkern.a
-
-MINIMAL = string.o snprintf.o bcmp.o bzero.o strcmp.o strcpy.o strlen.o
-EXTRA = malloc.o memory.o
-
-libc.a: $(MINIMAL) $(EXTRA)
-	rm -f libc.a
-	$(AR) r libc.a $(MINIMAL) $(EXTRA)
-
-libc.so: $(MINIMAL) $(EXTRA)
-	$(CC) -shared -o libc.so $(MINIMAL) $(EXTRA)
+TARGETS		:= libkern.a
+LIBRARY		:= libc.a
+SHLIB		:= libc.so
+SHLIB_MAJOR	:= 1
+SHLIB_MINOR	:= 0
+OBJS		:= $(MINIMAL) $(EXTRA)
 
 libkern.a: $(MINIMAL)
-	rm -f libkern.a
+	@rm -f libkern.a
 	$(AR) r libkern.a $(MINIMAL)
 
-clean:
-	rm -f *.a *.so *.o *~ os.* core *.core *.s *.map *.bin
+include $(BLTHOME)make.actions

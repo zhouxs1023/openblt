@@ -1,4 +1,4 @@
-/* $Id: //depot/blt/lib/string.c#3 $
+/* $Id: //depot/blt/lib/libc/string.c#4 $
 **
 ** Copyright 1998 Brian J. Swetland
 ** All rights reserved.
@@ -50,6 +50,20 @@ int strncmp(const char *s1, const char *s2, size_t n)
     if(n) return -1;
 
     return 0;    
+}
+
+char *strchr (const char *cs, int c)
+{
+	const char *s;
+
+	s = cs;
+	while (*s)
+		{
+			if (*s == c)
+				return (char *) s;
+			s++;
+		}
+	return NULL;
 }
 
 void *memset(void *s, int c, size_t n)

@@ -7,8 +7,9 @@
  * Public domain.
  */
 
-.globl strlen
-strlen:
+#include <i386/asm.h>
+
+FUNCTION (strlen)
 	pushl	%edi
 	movl	8(%esp),%edi		/* string address */
 	cld				/* set search forward */

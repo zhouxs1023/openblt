@@ -1,4 +1,8 @@
-# $Id: //depot/blt/kernel/jump.S#3 $
+/* $Id: //depot/blt/kernel/jump.S#8 $
+**
+** Copyright 1998 Brian Swetland.  All rights reserved.
+** Distributed under the terms of the OpenBLT License.
+*/
 
 #include "smp.h"
 
@@ -7,45 +11,12 @@
 .globl __null_irq
 .globl __timer_irq
 .globl __kbd_irq
-.globl __ex0
-.globl __ex1
-.globl __ex2
-.globl __ex3
-.globl __ex4
-.globl __ex5
-.globl __ex6
-.globl __ex7
-.globl __ex8
-.globl __ex9
-.globl __ex10
-.globl __ex11
-.globl __ex12
-.globl __ex13
-.globl __ex14
-.globl __ex15
-.globl __ex16
-.globl __ex17
-.globl __ex18
-.globl __irq1
-.globl __irq2
-.globl __irq3
-.globl __irq4
-.globl __irq5
-.globl __irq6
-.globl __irq7
-.globl __irq8
-.globl __irq9
-.globl __irq10
-.globl __irq11
-.globl __irq12
-.globl __irq13
-.globl __irq14
-.globl __irq15
 .globl __ipi_cf
 .globl __ipi_tlb
 .globl __ipi_pte
 .globl __ipi_resched
 .globl __ipi_stop
+.globl ehfunctab
 
 __null_irq:
 	movb $32, %al
@@ -77,152 +48,135 @@ __timer_irq:
 	popa
 	iret
 
-__ex0:
-	pusha
-	pushl $0
-	jmp _fault0
-__ex1:
-	pusha
-	pushl $1
-	jmp _fault0
-__ex2:
-	pusha
-	pushl $2
-	jmp _fault0
-__ex3:
-	pusha
-	pushl $3
-	jmp _fault0
-__ex4:
-	pusha
-	pushl $4
-	jmp _fault0
-__ex5:
-	pusha
-	pushl $5
-	jmp _fault0
-__ex6:
-	pusha
-	pushl $6
-	jmp _fault0
-__ex7:
-	pusha
-	pushl $7
-	jmp _fault0
-__ex8:
-	pusha	
-	pushl $8
-	jmp _fault1
-__ex9:
-	pusha
-	pushl $9
-	jmp _fault0
-__ex10:
-	pusha
-	pushl $10
-	jmp _fault1
-__ex11:
-	pusha
-	pushl $11
-	jmp _fault1
-__ex12:
-	pusha
-	pushl $12
-	jmp _fault1
-__ex13:
-	pusha
-	pushl $13
-	jmp _fault1
-__ex14:
-	pusha
-	pushl $14
-	jmp _fault1
-__ex15:
-	pusha
-	pushl $15
-	jmp _fault0
-__ex16:
-	pusha
-	pushl $16
-	jmp _fault0
-__ex17:
-	pusha
-	pushl $17
-	jmp _fault0
-__ex18:
-	pusha
-	pushl $18
-	jmp _fault0
+#define FAULT(n) \
+.globl __ex##n ;\
+__ex##n: ;\
+	pusha ;\
+	push $n ;\
+	mov $(n * 4 + ehfunctab), %ebx ;\
+	mov (%ebx), %ebx ;\
+	call *%ebx ;\
+	add $4,%esp ;\
+	popa ;\
+	iret
 
-__irq1:	
-	pushl $1
-	jmp __irq
-__irq2:	
-	pushl $2
-	jmp __irq
-__irq3:	
-	pushl $3
-	jmp __irq
-__irq4:	
-	pushl $4
-	jmp __irq
-__irq5:	
-	pushl $5
-	jmp __irq
-__irq6:	
-	pushl $6
-	jmp __irq
-__irq7:	
-	pushl $7
-	jmp __irq
-__irq8:	
-	pushl $8
-	jmp __irq
-__irq9:	
-	pushl $9
-	jmp __irq	
-__irq10:	
-	pushl $10
-	jmp __irq	
-__irq11:	
-	pushl $11
-	jmp __irq	
-__irq12:	
-	pushl $12
-	jmp __irq	
-__irq13:	
-	pushl $13
-	jmp __irq	
-__irq14:	
-	pushl $14
-	jmp __irq	
-__irq15:	
-	pushl $15
-	jmp __irq
-	
-__irq:
-	pusha
+#define FAULTE(n) \
+.globl __ex##n ;\
+__ex##n: ;\
+	pusha ;\
+	push $n ;\
+	mov $(n * 4 + ehfunctab), %ebx ;\
+	mov (%ebx), %ebx ;\
+	call *%ebx ;\
+	add $4,%esp ;\
+	popa ;\
+	add $4,%esp ;\
+	iret
 
-	call irq_dispatch
-		
-	movb $32, %al
-	outb %al, $32
-	
-	popa
-	add $4,%esp
-	iret
-			
-_fault0:
-	call fault
-	add $4,%esp
-	popa
-	iret
-_fault1:
-	call faultE
-	add $4,%esp
-	popa
-	add $4,%esp
-	iret
+FAULT(0)
+FAULT(1)
+FAULT(2)
+FAULT(3)
+FAULT(4)
+FAULT(5)
+FAULT(6)
+FAULT(7)
+FAULTE(8)
+FAULT(9)
+FAULTE(10)
+FAULTE(11)
+FAULTE(12)
+FAULTE(13)
+FAULTE(14)
+FAULT(15)
+FAULT(16)
+FAULT(17)
+FAULT(18)
+
+#define IRQ(n) \
+.globl __irq##n ;\
+__irq##n: ;\
+	push $n ;\
+	pusha ;\
+	call irq_dispatch ;\
+	movb $0x20, %al ;\
+	outb %al, $0x20 ;\
+	popa ;\
+	add $4,%esp ;\
+	iret 
+
+#define IRQHI(n) \
+.globl __irq##n ;\
+__irq##n: ;\
+	push $n ;\
+	pusha ;\
+	call irq_dispatch ;\
+	movb $0x20, %al ;\
+	outb %al, $0xA0 ;\
+	movb $0x20, %al ;\
+	outb %al, $0x20 ;\
+	popa ;\
+	add $4,%esp ;\
+	iret			
+
+IRQ(1)
+IRQ(2)
+IRQ(3)
+IRQ(4)
+IRQ(5)
+IRQ(6)
+IRQ(7)
+IRQHI(8)
+IRQHI(9)
+IRQHI(10)
+IRQHI(11)
+IRQHI(12)
+IRQHI(13)
+IRQHI(14)
+IRQHI(15)
+
+# From: Jeff Bush <jeff@be.com>
+
+;#       1. Stores necessary registers on old stack
+;#       2. Changes old stack pointer to reflect new offset
+;#       3. Change address space if necessary
+;#       4. Pops state off old stack
+;#       5. returns to address on old stack, resuming thread
+
+
+.globl          _context_switch
+.globl			thread_bootstrap
+.globl			kthread_bootstrap
+
+_context_switch:
+				pushf
+                pushl   %ebp
+                pushl   %esi
+                pushl   %edi
+				pushl	%ebx
+                movl    24(%esp), %eax          # Where to save stack pointer
+                movl    %esp, (%eax)            # Save old stack
+                movl    32(%esp), %eax          # Get new PDBR
+                movl    28(%esp), %ebx          # Get new stack loc
+
+                cmpl    $0, %eax                # Need to change addr. space?
+                je      changed_pdbr            # If parameter was zero, no
+                movl    %eax, %cr3              # Change address space
+
+changed_pdbr:   movl    %ebx, %esp              # switch to new stack
+				popl	%ebx
+                popl    %edi
+                popl    %esi
+                popl    %ebp
+                popf
+                ret
+				
+thread_bootstrap:
+				iret
+
+kthread_bootstrap:
+				lret
+
 
 #ifdef __SMP__
 

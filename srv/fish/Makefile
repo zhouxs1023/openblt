@@ -1,18 +1,9 @@
-# $Id: //depot/blt/srv/fish/Makefile#4 $
+BLTHOME := ../../
+include $(BLTHOME)make.conf
 
-include ../../make.conf
+SRCS		:= fish.c vga.c
+BINARY		:= fish.bin
+LIBS		:= -lblt -lc
 
-CFLAGS = $(CF) -I../../include
-LIBS = -L../../lib/obj -lconsole -lblt -lc 
+include $(BLTHOME)make.actions
 
-all: fish.bin
-
-OBJS = fish.o vga.o
-
-fish.bin: $(OBJS)
-	$(LD) -dN -Ttext $(ENTRY_USER) -o fish.bin ../../lib/crt0.o $(OBJS) $(LIBS)
-	$(NM) -nC fish.bin > fish.map
-	$(ST) fish.bin
-
-clean:
-	rm -f *.o *~ os.* core *.core *.s *.map *.bin

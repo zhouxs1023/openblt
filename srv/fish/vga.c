@@ -1,4 +1,4 @@
-/* $Id: //depot/blt/srv/fish/vga.c#2 $
+/* $Id: //depot/blt/srv/fish/vga.c#3 $
 **
 ** Copyright 1998 Brian J. Swetland
 ** All rights reserved.
@@ -109,6 +109,12 @@ int vga_set_mode(int xres, int yres, int bitdepth)
 #include "font.h"
 
 static unsigned int VRAM = 0xA0000;
+static unsigned int SRAM = 0xA0000;
+
+void vga_set_sram(void *addr)
+{
+    SRAM = (unsigned int) addr;
+}
 
 void vga_set_vram(void *addr)
 {
@@ -119,7 +125,7 @@ void vga_swap_buffers(void)
 {
     int i;
     unsigned int *vram = (unsigned int *) VRAM;
-    unsigned int *disp = (unsigned int *) 0xA0000;
+    unsigned int *disp = (unsigned int *) SRAM;
 
     i = 16000;
     while(i--) *disp++ = *vram++;

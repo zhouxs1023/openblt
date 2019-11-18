@@ -1,4 +1,4 @@
-/* $Id: //depot/blt/include/stdlib.h#2 $
+/* $Id: //depot/blt/include/stdlib.h#7 $
 **
 ** Copyright 1998 Brian J. Swetland
 ** All rights reserved.
@@ -30,9 +30,32 @@
 
 #include <blt/types.h>
 
-void *malloc(size_t size);
-void free(void *ptr);
-void *calloc(size_t nelem, size_t size);
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+	void *_malloc(size_t size);
+	void *malloc(size_t size);
+	void _free(void *ptr);
+	void free(void *ptr);
+	void *_realloc(void *ptr, size_t size);
+	void *realloc(void *ptr, size_t size);
+	
+	void _exit (int status);
+	void exit (int status);
+	
+	void _qsort (void *base, size_t nmembers, size_t membsize,
+		int (*compar)(const void *, const void *));
+	void qsort (void *base, size_t nmembers, size_t membsize,
+		int (*compar)(const void *, const void *));
+	
+	int _atoi (const char *a);
+	int atoi (const char *a);
+
+#ifdef __cplusplus
+}
+#endif
 
 
 #endif
+

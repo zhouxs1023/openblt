@@ -1,4 +1,4 @@
-/* $Id: //depot/blt/netboot/crt0.c#2 $
+/* $Id: //depot/blt/netboot/crt0.c#3 $
 **
 ** Copyright 1998 Brian J. Swetland
 ** All rights reserved.
@@ -25,14 +25,9 @@
 ** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 ** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
-void main(char *params, int mem);
+void main(int mem);
 
-struct file {
-    char *ptr;
-    int len;
-};
-
-void _start(int mem, char *params, struct file *files)
+void _start(int mem)
 {
-    main(params,mem);
+    main(mem);
 }

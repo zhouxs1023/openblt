@@ -1,27 +1,37 @@
-# $Id: //depot/blt/netboot/Makefile#2 $
+BLTHOME := ../
+include $(BLTHOME)make.conf
 
-include ../make.conf
+CFLAGS 		:= -I$(BLTHOME)include -fno-pic -O2
+LIBS 		:= -L$(BLTHOME)lib/obj -lconsole -lkern
+ST			:= strip
 
-CFLAGS = $(CF) -I../include
-LIBS = -L../lib -lconsole -lkern
+all: netrom.hex 
 
-all: netboot.bin netrom.hex
+load: netrom.hex
+	./sersend -b 115200 /dev/ports/serial1 < netrom.hex 
 
-makerom: makerom.o
-	gcc -o makerom makerom.o
+makerom: makerom.c
+	gcc -o makerom makerom.c
 
-netrom.hex: netboot.bin makerom
-	cat netrom.bin netboot.bin > temp.bin
-	./makerom temp.bin netrom.hex
-	rm -f temp.bin
+netrom: netrom.asm
+	nasm netrom.asm
 
+netrom.hex: netrom netboot.raw makerom
+	cat netrom netboot.raw > temp.raw
+	./makerom temp.raw netrom.hex
 
-OBJS = crt0.o netboot.o ne2000.o
+OBJS = crt0.o netboot.o pci.o ne2000.o 
 
-netboot.bin: $(OBJS)
-	$(LD) -dN -Ttext $(ENTRY_ROM) -o netboot.bin  $(OBJS) $(LIBS)
+netboot.raw: $(OBJS)
+	$(LD) -dN -Ttext 0x90000 -o netboot.bin  $(OBJS) $(LIBS)
 	$(NM) -nC netboot.bin > netboot.map
-	$(ST) netboot.bin
+	objcopy -O binary netboot.bin netboot.raw
+
+download: download.c
+	cc -o download download.c
+
+install: download netrom.hex
+	./download < netrom.hex
 
 clean:
-	rm -f *.o *~ os.* core *.core *.s *.map netboot.bin temp.bin netrom.hex *.boot makerom
+	rm -f *.o *~ os.* core *.core *.s *.map netboot.bin temp.raw netboot.raw netrom.hex *.boot makerom download

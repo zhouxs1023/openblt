@@ -1,49 +1,22 @@
-/* $Id: //depot/blt/kernel/fault.c#3 $
-**
-** Copyright 1998 Brian J. Swetland
-** All rights reserved.
-**
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions, and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions, and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
-**
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+/* Copyright 1998-1999, Brian J. Swetland. All rights reserved.
+** Distributed under the terms of the OpenBLT License
 */
 
 #include <i386/io.h>
 #include "kernel.h"
-#include "queue.h"
 #include "memory.h"
 #include "smp.h"
 #include "init.h"
+#include "port.h"
+#include "task.h"
+#include "aspace.h"
+#include "resource.h"
+#include "pager.h"
+#include "i386.h"
 
 #define noHALT_ON_FAULT
 #define DEBUG_ON_FAULT
 #define noCRASH_ON_FAULT
-
-#define noTRACK_SYSCALLS
-
-
-#include "port.h"
-#include "task.h"
-#include "aspace.h"
-extern queue_t *run_queue;
 
 static char *etable[] = {
     "Divide-by-zero",
@@ -67,58 +40,26 @@ static char *etable[] = {
     "Machine Check"
 };
 
+typedef void (*ehfunc)();
 
+static void __fault(uint32 number, regs r, uint32 eip, uint32 cs,
+		uint32 eflags);
+static void __faultE(uint32 number, regs r, uint32 error, uint32 eip, uint32 cs,
+		uint32 eflags);
 
-#ifdef MONO
-unsigned char *screen = (unsigned char *) 0xB0000;
-#else
-unsigned char *screen = (unsigned char *) 0xB8000;
-#endif
+ehfunc ehfunctab[] = 
+	{ __fault, __fault, __fault, __fault,
+	  __fault, __fault, __fault, __fault,
+	  __faultE, __fault, __faultE, __faultE,
+	  __faultE, __faultE, __faultE /*page_fault*/, __fault,
+	  __fault, __fault, __fault };
 
+extern unsigned char *screen;
 
 task_t *irq_task_map[16];
 
-typedef struct { uint32 edi, esi, ebp, esp, ebx, edx, ecx, eax; } regs;
 void k_debugger(regs *r, uint32 eip, uint32 cs, uint32 eflags);
-
-#ifdef OLD
-static void taskinfo(task *t)
-{
-        
-    kprintf("Task %X at %x:",t->rid,(int)t);
-    aspace_print(t->addr);
-    kprintf("TSS:   esp = %x   eip = %x",t->tss.esp,t->tss.eip);
-    kprintf("TSS:  esp0 = %x",t->tss.esp0);
-}
-
-static void trace(uint32 ebp,uint32 eip)
-{
-    int f = 1;
-
-    kprintf("f# EBP      EIP");    
-    kprintf("00 xxxxxxxx %x",eip);    
-    do {        
-/*        kprintf("%X %x %x",f,ebp, *((uint32*)ebp));*/
-        kprintf("%X %x %x",f,ebp+4, *((uint32*)(ebp+4)));
-        ebp = *((uint32*)ebp);
-        f++;        
-    } while(ebp < 0x00400000 && ebp > 0x00200000);    
-}
-
-static void dump(int addr, int sections)
-{
-    int i;
-    unsigned char *x;
-    if(addr < 0) return;
-    
-    for(i=0;i<sections;i++){
-        x = (unsigned char *) (addr + 16*i);
-        kprintf("%x: %X %X %X %X  %X %X %X %X  %X %X %X %X  %X %X %X %X",
-                addr+16*i,x[0],x[1],x[2],x[3],x[4],x[5],x[6],x[7],
-                x[8],x[9],x[10],x[11],x[12],x[13],x[14],x[15]);
-    }
-}
-#endif
+void terminate(void);
 
 void print_regs(regs *r, uint32 eip, uint32 cs, uint32 eflags)
 {
@@ -130,17 +71,37 @@ void print_regs(regs *r, uint32 eip, uint32 cs, uint32 eflags)
             eflags, cs, eip);   
 }
 
+void user_debug(regs *r, uint32 *eip, uint32 *eflags)
+{
+#if 1
+	return;
+#else
+	int src,p,sz;
+	task_t *t0;
+	uchar buf[16];
+	uint32 code;
+	
+	p = port_create(0, "debug control");
+		
+	/* wake all blocking objects */
+	while((t0 = list_detach_head(&current->rsrc.queue))) task_wake(t0,ERR_RESOURCE);
+		
+	kprintf("Waiting on debug control port (%d)... ",p);
+	current->team = kernel_team; // XXX hack 
+	 
+	while((sz = port_recv(p, &src, buf, 16, &code)) >= 0){
+	}
+	kprintf("debug control error %d\n",sz);
+	
+#endif
+}
 
-void faultE(uint32 number,
+
+static void __faultE(uint32 number,
             regs r, uint32 error,
             uint32 eip, uint32 cs, uint32 eflags)
 {
     uint32 _cr2, _cr3;
-
-#ifdef CRASH_ON_FAULT
-    i386lidt(0,0);
-    asm("int $0");
-#endif
 
     kprintf("");
     kprintf("*** Exception 0x%X* (%s)",number,etable[number]);
@@ -154,8 +115,10 @@ void faultE(uint32 number,
     asm("mov %%cr3, %0":"=r" (_cr3));
     kprintf("   cr2 = %x   cr3 = %x error = %x",_cr2,_cr3,error);
     kprintf("");
-    kprintf("Task %X (%s) crashed.",current->rsrc.id,current->name);
+    kprintf("Task %d (%s) crashed.",current->rsrc.id,current->rsrc.name);
 
+	if((cs & 0xFFF8) == SEL_UCODE) user_debug(&r, &eip, &eflags);
+	
 #ifdef DEBUG_ON_FAULT
     current->flags = tDEAD;
     k_debugger(&r, eip, cs, eflags);
@@ -168,21 +131,20 @@ void faultE(uint32 number,
     terminate();    
 }
 
-void fault(uint32 number,
+static void __fault(uint32 number,
            regs r,
            uint32 eip, uint32 cs, uint32 eflags)
 {
 
-#ifdef CRASH_ON_FAULT
-    i386lidt(0,0);
-    asm("int $0");
-#endif
     kprintf("");
     kprintf("*** Exception 0x%X (%s)",number,etable[number]);
     print_regs(&r, eip, cs, eflags);
 
     kprintf("");
-    kprintf("Task %X (%s) crashed.",current->rsrc.id,current->name);
+    kprintf("Task %d (%s) crashed.",current->rsrc.id,current->rsrc.name);
+	
+	if((cs & 0xFFF8) == SEL_UCODE) user_debug(&r, &eip, &eflags);
+	
 #ifdef DEBUG_ON_FAULT
     if(number != 2){
         current->flags = tDEAD;
@@ -202,9 +164,7 @@ void irq_dispatch(regs r, uint32 number)
     mask_irq(number);    
     if(irq_task_map[number]){
         if(irq_task_map[number]->flags == tSLEEP_IRQ){
-            irq_task_map[number]->flags = tREADY;
-            queue_addHead(run_queue, irq_task_map[number], 0);            
-            preempt();            
+            preempt(irq_task_map[number],ERR_NONE);            
         }
     }    
 }
@@ -226,24 +186,21 @@ void pulse (void)
 
 void timer_irq(regs r, uint32 eip, uint32 cs, uint32 eflags)
 {
-    struct _ll *n = time_first.next;
+	task_t *task;
     kernel_timer++;
     
-    while(n && (n->when <= kernel_timer)){
-            /*     kprintf("rescheduling %d\n",n->t->rid);*/
-        n->t->flags = tREADY;
-        queue_addTail(run_queue, n->t, 0);
-
-        time_first.next = n->next;
-        if(n->next) n->next->prev = NULL;
-        kfree16(n);
-        n = time_first.next;
-    }
+	while((task = rsrc_queue_peek(timer_queue))){
+		if(task->wait_time <= kernel_timer){
+			task = rsrc_dequeue(timer_queue);
+			rsrc_enqueue(run_queue, task);
+		} else {
+			break;
+		}
+	}
 #ifdef PULSE
     pulse ();
 #endif    
-    swtch();
-    
+    swtch();    
 }
 
 extern void __null_irq(void);
@@ -330,6 +287,7 @@ void __init__ init_idt(uint32 *IDT)
     
     remap_irqs();
     unmask_irq(0);
+    unmask_irq(2);
 }
 
 void restore_idt(void)

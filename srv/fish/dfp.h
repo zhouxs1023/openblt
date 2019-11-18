@@ -1,4 +1,4 @@
-/* $Id: //depot/blt/srv/fish/dfp.h#2 $
+/* $Id: //depot/blt/srv/fish/dfp.h#3 $
 **
 ** Copyright 1998 Brian J. Swetland
 ** All rights reserved.
@@ -46,8 +46,8 @@
 typedef unsigned char  uint8;
 typedef unsigned short uint16;
 typedef unsigned int   uint32;
-typedef char           sint8;
 #endif
+typedef char           sint8;
 
 #define DFP_VERSION	        0x0201
 

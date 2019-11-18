@@ -1,6 +1,6 @@
-/* $Id: //depot/blt/include/blt/vfs.h#2 $
+/* $Id: //depot/blt/include/blt/vfs.h#7 $
 **
-** Copyright 1998 Sidney Cammeresi
+** Copyright 1998-1999 Sidney Cammeresi
 ** All rights reserved.
 **
 ** Redistribution and use in source and binary forms, with or without
@@ -30,101 +30,89 @@
 #define _BLT_VFS_H_
 
 #include <blt/types.h>
+#include <blt/fdl.h>
 
-#define MAX_TYPE_LEN      32
-#define MAX_DIR_LEN       255
+/* operations */
+#define VFS_OPENCONN                 1
+#define VFS_CLOSECONN                2
+#define VFS_SCROLL_AREA              19
 
-#define VFS_MOUNT_MSG     1
+#define VFS_MOUNT                    3
+#define VFS_UNMOUNT                  4
+#define VFS_INITIALISE               5
+#define VFS_SYNC                     6
+#define VFS_RFSTAT                   7
+#define VFS_WFSTAT                   8
 
+#define VFS_CREATE                   9
+#define VFS_MKDIR                    10
+#define VFS_SYMLINK                  11
+#define VFS_LINK                     12
+#define VFS_RENAME                   13
+#define VFS_UNLINK                   14
+#define VFS_RMDIR                    15
+#define VFS_READLINK                 16
+
+#define VFS_OPENDIR                  17
+#define VFS_CLOSEDIR                 18
+
+#define VFS_OPEN                     21
+#define VFS_CLOSE                    22
+#define VFS_READ                     23
+#define VFS_WRITE                    24
+#define VFS_IOCTL                    25
+#define VFS_SETFLAGS                 26
+#define VFS_RSTAT                    27
+#define VFS_WSTAT                    28
+#define VFS_FSYNC                    29
+
+#define VFS_OPEN_ATTRDIR             30
+#define VFS_CLOSE_ATTRDIR            31
+#define VFS_REWIND_ATTRDIR           32
+#define VFS_READ_ATTRDIR             33
+#define VFS_READ_ATTR                34
+#define VFS_WRITE_ATTR               35
+#define VFS_REMOVE_ATTR              36
+#define VFS_RENAME_ATTR              37
+#define VFS_STAT_ATTR                38
+
+#define VFS_OPEN_INDEXDIR            39
+#define VFS_CLOSE_INDEXDIR           40
+#define VFS_REWIND_INDEXDIR          41
+#define VFS_READ_INDEXDIR            42
+#define VFS_READ_INDEX               43
+#define VFS_WRITE_INDEX              44
+#define VFS_REMOVE_INDEX             45
+#define VFS_RENAME_INDEX             46
+#define VFS_STAT_INDEX               47
+
+#define VFS_OPEN_QUERY               48
+#define VFS_CLOSE_QUERY              49
+#define VFS_READ_QUERY               50
+
+/* vfs result codes */
+#define VFS_OK                        1
+#define VFS_ERROR                     2
+#define VFS_MORE_DATA                 4
 
 typedef struct
 {
-} bootfs_mount_params;
-
-union mount_params
-{
-	bootfs_mount_params bootfs;
-};
+	unsigned int cmd;
+	unsigned int data[6];
+} vfs_cmd_t;
 
 typedef struct
 {
-	char type[MAX_TYPE_LEN], dir[MAX_DIR_LEN];
-	int flags;
-	union mount_params params;
-} mount_msg_t;
+	unsigned int status, errno;
+	unsigned int data[6];
+} vfs_res_t;
 
 typedef struct
 {
-	char dir[MAX_DIR_LEN];
-	int flags;
-} unmount_msg_t;
-
-typedef struct
-{
-	int type;
-	union
-	{
-		mount_msg_t mount_msg;
-		unmount_msg_t unmount_msg;
-	} data;
-} vfs_msg_t;
-
-/* wrappers to ipc */
-
-typedef struct
-{
-	void *data;
-	size_t size;
-	char *type, *name;
-} *handle_t;
-
-typedef struct
-{
-} res_info;
-
-/* these work on both forks */
-int open (const char *path, int flags); /* returns an fd */
-int close (int fd);
-int creat (const char *path, const char *creator, const char *type);
-
-/* these are fork-specific */
-int new_fork (int fd, const char *name);
-int num_forks (int fd);
-char *get_fork_name (int fd, int fork);
-int read_fork (int fd, int fork, void *buf, size_t numbytes);
-int write_fork (int fd, int fork, const void *buf, size_t numbytes);
-
-/* these don't */
-int df_creat (int fd);
-size_t df_read (int fd, void *buf, size_t numbytes);
-size_t df_write (int fd, const void *buf, size_t numbytes);
-
-int rf_creat (int fd);
-int rf_num_types (int fd);
-const char *rf_get_type (int fd, int type_index);
-/*res_info *rf_get_resource_info (int fd, char *type, char *name);
-int rf_set_resource_info (handle_t h, res_info *info);*/
-handle_t rf_get_indexed_resource (int fd, int index);
-handle_t rf_get_named_resource (int fd, char *type, char *name);
-int rf_res_size (handle_t h);
-void *rf_get_ptr (handle_t h);
-int rf_changed_resource (handle_t h);
-handle_t rf_new_resource (char *type, char *name, size_t size);
-int rf_add_resource (int fd, handle_t h);
-int rf_remove_resource (handle_t h);
-void rf_update (int fd);
-void rf_update_all (void);
-int rf_write_resource (handle_t h);
-
-/* wrappers to df_* for ease of user */
-size_t read (int fd, void *buf, size_t numbytes);
-size_t write (int fd, const void *buf, size_t numbytes);
-
-/* directory operations */
-int opendir (const char *path); /* returns a dd */
-int closedir (int dd);
-int searchdir (int dd, const char *creator, const char *type);
-int mkdir (const char *path);
+	char *buf;
+	int srv_fd, area_offset;
+	int offset, length, more;
+} vfs_fd;
 
 #endif
 

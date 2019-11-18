@@ -13,8 +13,9 @@
  * cache.
  */
 
-.globl strcmp
-strcmp:
+#include <i386/asm.h>
+
+FUNCTION (strcmp)	
 	movl	0x04(%esp),%eax
 	movl	0x08(%esp),%edx
 	jmp	L2			/* Jump into the loop! */
